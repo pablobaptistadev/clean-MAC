@@ -1,0 +1,12 @@
+# Build do Swift Package e app gerado
+.build/
+build/
+*.app
+*.dmg
+*.zip
+
+# macOS / editores
+.DS_Store
+.swiftpm/
+*.xcodeproj/
+xcuserdata/
