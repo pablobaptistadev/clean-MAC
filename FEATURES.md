@@ -22,7 +22,7 @@ Levantado do código do repositório tw93/Mole (dispatcher `mole`, `bin/*.sh`, `
 | `mo status --watch --interval` | Status + Monitor da barra | um processo contínuo em vez de consultas |
 | `mo status` CPU, GPU, memória, disco, I/O, rede, proxy, térmico, ventoinha, sensores, bateria, Bluetooth, Lixo, zumbis | Status + Monitor | cards coloridos |
 | `--proc-cpu-threshold` / `--proc-cpu-window` / `--proc-cpu-alerts` | Ajustes › Monitor e alertas | banner no Status + notificação do macOS |
-| Lista de processos | Status › Processos | todos via `ps`, ordenável por memória/CPU/nome/PID; encerrar, copiar PID, por que está rodando |
+| Lista de processos | Status › Processos + Monitor da barra | todos via `ps`, agrupados por app (helpers somados, grupo expansível), ordenável por memória/CPU/nome/PID; encerrar, copiar PID, por que está rodando |
 | `mo history --json --limit` | Histórico | totais, execuções, itens removidos, abrir logs |
 | `MO_NO_OPLOG=1` | Ajustes › Registrar histórico | |
 | `mo touchid status/enable/disable` | Ajustes › Touch ID para sudo | status no app, mudança no Terminal (precisa de senha) |

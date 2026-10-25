@@ -342,16 +342,19 @@ struct MonitorView: View {
                 if let p = procs.pendingKill { procs.terminate(p, force: true) }
                 procs.pendingKill = nil
             }
+        } message: {
+            Text(procs.pendingKill?.killWarning ?? "")
         }
         .alert(
-            procs.info?.process.name ?? "",
+            procs.info?.group.name ?? "",
             isPresented: Binding(get: { procs.info != nil && procs.actionOrigin == "monitor" }, set: { if !$0 { procs.info = nil } })
         ) {
             Button("OK") { procs.info = nil }
             Button("Copiar PID") { if let p = procs.info?.process { procs.copyPID(p) }; procs.info = nil }
         } message: {
             if let d = procs.info {
-                Text("\(d.reason)\n\nPID \(d.process.pid) · \(Bytes.mem(d.process.memoryBytes))\(d.parent.map { " · pai: \($0.name)" } ?? "")\n\(d.process.path)")
+                let count = d.group.count > 1 ? " · \(d.group.count) processos" : ""
+                Text("\(d.reason)\n\nPID \(d.process.pid) · \(Bytes.mem(d.group.memoryBytes))\(count)\(d.parent.map { " · pai: \($0.name)" } ?? "")\n\(d.process.path)")
             }
         }
     }
@@ -503,7 +506,7 @@ struct MonitorView: View {
             ForEach(procs.topByMemory(5)) { p in
                 HStack(spacing: 8) {
                     Group {
-                        if let icon = procs.icon(for: p) { Image(nsImage: icon).resizable() } else { Image(systemName: "gearshape").foregroundStyle(Theme.muted) }
+                        if let icon = procs.icon(for: p.main) { Image(nsImage: icon).resizable() } else { Image(systemName: "gearshape").foregroundStyle(Theme.muted) }
                     }
                     .frame(width: 16, height: 16)
                     Text(p.name).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
@@ -515,12 +518,13 @@ struct MonitorView: View {
                         .foregroundStyle(p.cpu > 50 ? Palette.warm : Theme.text)
                         .monospacedDigit()
                         .frame(width: 42, alignment: .trailing)
-                    ProcessActionsMenu(process: p, model: procs, origin: "monitor")
+                    ProcessActionsMenu(group: p, model: procs, origin: "monitor")
                         .frame(width: 20)
                 }
                 .font(.system(size: 13))
                 .padding(.vertical, 5)
-                .contextMenu { ProcessActions(process: p, model: procs, origin: "monitor") }
+                .help(p.count > 1 ? "\(p.name): \(p.count) processos somados" : p.name)
+                .contextMenu { ProcessActions(group: p, model: procs, origin: "monitor") }
             }
             Button("Ver todos os processos") { onOpen(.status) }
                 .buttonStyle(.plain)

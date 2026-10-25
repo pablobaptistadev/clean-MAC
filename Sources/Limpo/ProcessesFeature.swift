@@ -15,6 +15,61 @@ struct ProcessInfoRow: Identifiable, Hashable {
     var id: Int32 { pid }
 
     var isApp: Bool { path.contains(".app/") }
+
+    /// Pacote .app mais externo (o app "dono" dos helpers aninhados dentro dele).
+    var bundlePath: String? {
+        guard let range = path.range(of: ".app/") else { return nil }
+        return String(path[..<range.lowerBound]) + ".app"
+    }
+}
+
+/// O que um processo e um grupo de processos têm em comum (para ordenar os dois do mesmo jeito).
+protocol ProcessMetrics {
+    var pid: Int32 { get }
+    var memoryBytes: Int64 { get }
+    var cpu: Double { get }
+    var name: String { get }
+}
+
+extension ProcessInfoRow: ProcessMetrics {}
+
+/// Processos somados pelo app a que pertencem (ex.: Google Chrome + todos os "Google Chrome Helper").
+/// Fora de um .app, junta os processos do mesmo executável.
+struct ProcessGroup: Identifiable, ProcessMetrics {
+    let key: String
+    let name: String
+    /// Processo principal: usado no ícone, no PID e nas ações.
+    let main: ProcessInfoRow
+    let members: [ProcessInfoRow]
+    let memoryBytes: Int64
+    let cpu: Double
+    var id: String { key }
+    var pid: Int32 { main.pid }
+    var count: Int { members.count }
+
+    init(key: String, members: [ProcessInfoRow]) {
+        let byMemory = members.sorted { $0.memoryBytes > $1.memoryBytes }
+        let pids = Set(byMemory.map(\.pid))
+        let main = byMemory.first { $0.path.hasPrefix(key + "/Contents/MacOS/") }
+            ?? byMemory.first { !pids.contains($0.ppid) }
+            ?? byMemory[0]
+        self.key = key
+        self.name = key.hasSuffix(".app") ? ((key as NSString).lastPathComponent as NSString).deletingPathExtension : main.name
+        self.main = main
+        self.members = byMemory
+        self.memoryBytes = byMemory.reduce(0) { $0 + $1.memoryBytes }
+        self.cpu = byMemory.reduce(0) { $0 + $1.cpu }
+    }
+
+    init(single p: ProcessInfoRow) {
+        self.init(key: "pid:\(p.pid)", members: [p])
+    }
+
+    var killWarning: String {
+        count > 1
+            ? "Encerra \(name) e os \(count) processos dele. Alterações não salvas podem ser perdidas."
+            : "Alterações não salvas nesse app podem ser perdidas."
+    }
 }
 
 @MainActor
@@ -28,13 +83,15 @@ final class ProcessModel {
     var query = ""
     var onlyMine = false
     var error: String?
-    var pendingKill: ProcessInfoRow?
+    var pendingKill: ProcessGroup?
     var info: ProcessDetails?
     /// Qual tela pediu a ação (janela ou monitor), para o alerta aparecer só nela.
     var actionOrigin = "window"
+    /// Grupos abertos na lista (mostram cada processo do app).
+    var expanded: Set<String> = []
 
-    func topByMemory(_ n: Int) -> [ProcessInfoRow] {
-        Array(all.sorted { $0.memoryBytes > $1.memoryBytes }.prefix(n))
+    func topByMemory(_ n: Int) -> [ProcessGroup] {
+        Array(Self.group(all).sorted { $0.memoryBytes > $1.memoryBytes }.prefix(n))
     }
 
     private var viewers = 0
@@ -43,16 +100,39 @@ final class ProcessModel {
 
     var totalMemory: Int64 { all.reduce(0) { $0 + $1.memoryBytes } }
 
-    var visible: [ProcessInfoRow] {
+    var visible: [ProcessGroup] {
         var list = all
         if onlyMine {
             let me = NSUserName()
             list = list.filter { $0.user == me }
         }
+        var groups = Self.group(list)
         if !query.isEmpty {
-            list = list.filter { $0.name.localizedCaseInsensitiveContains(query) || "\($0.pid)" == query }
+            groups = groups.filter { $0.name.localizedCaseInsensitiveContains(query) || $0.members.contains(where: matches) }
         }
-        let sorted: [ProcessInfoRow]
+        return sorted(groups)
+    }
+
+    /// Processos mostrados ao abrir um grupo; numa busca que não bate com o nome do app, só os que batem.
+    func children(of g: ProcessGroup) -> [ProcessInfoRow] {
+        guard !query.isEmpty, !g.name.localizedCaseInsensitiveContains(query) else { return sorted(g.members) }
+        return sorted(g.members.filter(matches))
+    }
+
+    func isExpanded(_ g: ProcessGroup) -> Bool {
+        g.count > 1 && (expanded.contains(g.id) || (!query.isEmpty && !g.name.localizedCaseInsensitiveContains(query)))
+    }
+
+    func toggleExpanded(_ g: ProcessGroup) {
+        if expanded.contains(g.id) { expanded.remove(g.id) } else { expanded.insert(g.id) }
+    }
+
+    private func matches(_ p: ProcessInfoRow) -> Bool {
+        p.name.localizedCaseInsensitiveContains(query) || "\(p.pid)" == query
+    }
+
+    private func sorted<T: ProcessMetrics>(_ list: [T]) -> [T] {
+        let sorted: [T]
         switch sort {
         case .memory: sorted = list.sorted { $0.memoryBytes > $1.memoryBytes }
         case .cpu: sorted = list.sorted { $0.cpu > $1.cpu }
@@ -61,6 +141,12 @@ final class ProcessModel {
         }
         let defaultAscending = sort == .name || sort == .pid
         return ascending == defaultAscending ? sorted : sorted.reversed()
+    }
+
+    /// Junta os processos pelo .app mais externo do caminho; fora de apps, pelo executável.
+    nonisolated static func group(_ list: [ProcessInfoRow]) -> [ProcessGroup] {
+        Dictionary(grouping: list) { p in p.bundlePath ?? (p.path.isEmpty ? "pid:\(p.pid)" : p.path) }
+            .map { ProcessGroup(key: $0.key, members: $0.value) }
     }
 
     func toggleSort(_ s: Sort) {
@@ -133,8 +219,7 @@ final class ProcessModel {
         var image: NSImage?
         if let app = NSRunningApplication(processIdentifier: p.pid), let icon = app.icon {
             image = icon
-        } else if let range = p.path.range(of: ".app/") {
-            let bundle = String(p.path[..<range.lowerBound]) + ".app"
+        } else if let bundle = p.bundlePath {
             image = NSWorkspace.shared.icon(forFile: bundle)
         }
         if let image { iconCache[p.pid] = image }
@@ -149,19 +234,20 @@ final class ProcessModel {
     }
 
     func reveal(_ p: ProcessInfoRow) {
-        var target = p.path
-        if let range = p.path.range(of: ".app/") {
-            target = String(p.path[..<range.lowerBound]) + ".app"
-        }
+        let target = p.bundlePath ?? p.path
         guard FileManager.default.fileExists(atPath: target) else { return }
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: target)])
     }
 
-    func terminate(_ p: ProcessInfoRow, force: Bool) {
-        if let app = NSRunningApplication(processIdentifier: p.pid) {
+    func terminate(_ g: ProcessGroup, force: Bool) {
+        // App aberto: pede para ele fechar e os auxiliares saem junto. Sem app, sinaliza cada processo do grupo.
+        if let app = NSRunningApplication(processIdentifier: g.main.pid) {
             _ = force ? app.forceTerminate() : app.terminate()
+            if force {
+                for p in g.members where p.pid != g.main.pid { kill(p.pid, SIGKILL) }
+            }
         } else {
-            kill(p.pid, force ? SIGKILL : SIGTERM)
+            for p in g.members { kill(p.pid, force ? SIGKILL : SIGTERM) }
         }
         Task {
             try? await Task.sleep(for: .milliseconds(600))
@@ -169,21 +255,28 @@ final class ProcessModel {
         }
     }
 
-    func explain(_ p: ProcessInfoRow) async {
+    func explain(_ g: ProcessGroup) async {
+        let p = g.main
         let parent = all.first { $0.pid == p.ppid }
         let started = (try? await Shell.run("/bin/ps", ["-o", "lstart=", "-p", "\(p.pid)"]))?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        info = ProcessDetails(process: p, parent: parent, started: started)
+        info = ProcessDetails(group: g, parent: parent, started: started)
     }
 }
 
 struct ProcessDetails: Identifiable {
-    let process: ProcessInfoRow
+    let group: ProcessGroup
     let parent: ProcessInfoRow?
     let started: String
+    var process: ProcessInfoRow { group.main }
     var id: Int32 { process.pid }
 
     var reason: String {
+        let helpers = group.count > 1 ? " Junto com ele rodam \(group.count - 1) processos auxiliares; o uso mostrado é a soma de todos." : ""
+        return mainReason + helpers
+    }
+
+    private var mainReason: String {
         let p = process
         if NSRunningApplication(processIdentifier: p.pid)?.activationPolicy == .regular {
             return "É um app aberto por você (aparece no Dock)."
@@ -218,10 +311,16 @@ struct ProcessListView: View {
             Divider().overlay(Theme.hairline)
             header(model)
             Divider().overlay(Theme.hairline)
-            let maxMemory = model.all.map(\.memoryBytes).max() ?? 1
+            let groups = model.visible
+            let maxMemory = groups.map(\.memoryBytes).max() ?? 1
             LazyVStack(spacing: 0) {
-                ForEach(model.visible) { p in
-                    ProcessRowView(process: p, model: model, maxMemory: maxMemory)
+                ForEach(groups) { g in
+                    ProcessRowView(group: g, model: model, maxMemory: maxMemory)
+                    if model.isExpanded(g) {
+                        ForEach(model.children(of: g)) { p in
+                            ProcessRowView(group: ProcessGroup(single: p), model: model, maxMemory: maxMemory, isChild: true)
+                        }
+                    }
                 }
             }
         }
@@ -243,7 +342,7 @@ struct ProcessListView: View {
                 model.pendingKill = nil
             }
         } message: {
-            Text("Alterações não salvas nesse app podem ser perdidas.")
+            Text(model.pendingKill?.killWarning ?? "")
         }
         .sheet(item: Binding(get: { model.actionOrigin == "window" ? model.info : nil }, set: { model.info = $0 })) { details in
             ProcessDetailsSheet(details: details) { model.info = nil }
@@ -254,7 +353,8 @@ struct ProcessListView: View {
         HStack(spacing: 12) {
             Text("Processos")
                 .font(.system(size: 15, weight: .semibold))
-            Text("\(model.visible.count) · \(Bytes.mem(model.totalMemory)) em uso")
+            let groups = model.visible
+            Text("\(groups.count) apps e serviços · \(groups.reduce(0) { $0 + $1.count }) processos · \(Bytes.mem(model.totalMemory)) em uso")
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.muted)
             if let zombies = store.status.snapshot?.zombie_count, zombies > 0 {
@@ -282,6 +382,7 @@ struct ProcessListView: View {
 
     private func header(_ model: ProcessModel) -> some View {
         HStack(spacing: 12) {
+            Color.clear.frame(width: 10, height: 1)
             Color.clear.frame(width: 24, height: 1)
             sortButton("NOME", .name, model).frame(maxWidth: .infinity, alignment: .leading)
             sortButton("MEMÓRIA", .memory, model).frame(width: 220, alignment: .trailing)
@@ -315,28 +416,44 @@ struct ProcessListView: View {
 }
 
 private struct ProcessRowView: View {
-    let process: ProcessInfoRow
+    let group: ProcessGroup
     let model: ProcessModel
     let maxMemory: Int64
+    /// Processo de um grupo aberto (linha recuada, sem seta).
+    var isChild = false
 
     var body: some View {
-        let p = process
+        let p = group
+        let expandable = !isChild && p.count > 1
         HStack(spacing: 12) {
+            Image(systemName: "chevron.right")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(Theme.muted)
+                .rotationEffect(.degrees(model.isExpanded(p) ? 90 : 0))
+                .frame(width: 10)
+                .opacity(expandable ? 1 : 0)
+
             Group {
-                if let icon = model.icon(for: p) {
+                if let icon = model.icon(for: p.main) {
                     Image(nsImage: icon).resizable()
                 } else {
                     Image(systemName: "gearshape")
-                        .font(.system(size: 13))
+                        .font(.system(size: isChild ? 11 : 13))
                         .foregroundStyle(Theme.muted)
                 }
             }
-            .frame(width: 22, height: 22)
+            .frame(width: isChild ? 16 : 22, height: isChild ? 16 : 22)
+            .padding(.leading, isChild ? 14 : 0)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(p.name).lineLimit(1)
-                if p.user != NSUserName() {
-                    Text(p.user).font(.system(size: 10.5)).foregroundStyle(Theme.muted)
+                    .foregroundStyle(isChild ? Theme.muted : Theme.text)
+                let subtitle = [
+                    p.count > 1 ? "\(p.count) processos" : nil,
+                    p.main.user != NSUserName() ? p.main.user : nil
+                ].compactMap { $0 }.joined(separator: " · ")
+                if !subtitle.isEmpty {
+                    Text(subtitle).font(.system(size: 10.5)).foregroundStyle(Theme.muted)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -365,25 +482,31 @@ private struct ProcessRowView: View {
                 .foregroundStyle(Theme.muted)
                 .frame(width: 64, alignment: .trailing)
 
-            ProcessActionsMenu(process: p, model: model)
+            ProcessActionsMenu(group: p, model: model)
                 .frame(width: 24)
         }
-        .font(.system(size: 13.5))
+        .font(.system(size: isChild ? 12.5 : 13.5))
         .padding(.horizontal, 20)
-        .frame(height: 40)
+        .frame(height: isChild ? 32 : 40)
+        .background(isChild ? Color.black.opacity(0.12) : Color.clear)
         .contentShape(Rectangle())
-        .contextMenu { ProcessActions(process: p, model: model) }
+        .onTapGesture {
+            guard expandable else { return }
+            withAnimation(.easeOut(duration: 0.15)) { model.toggleExpanded(p) }
+        }
+        .help(expandable ? "Clique para ver cada processo de \(p.name)" : "")
+        .contextMenu { ProcessActions(group: p, model: model) }
     }
 }
 
 struct ProcessActionsMenu: View {
-    let process: ProcessInfoRow
+    let group: ProcessGroup
     let model: ProcessModel
     var origin = "window"
 
     var body: some View {
         Menu {
-            ProcessActions(process: process, model: model, origin: origin)
+            ProcessActions(group: group, model: model, origin: origin)
         } label: {
             Image(systemName: "ellipsis")
                 .foregroundStyle(Theme.muted)
@@ -395,19 +518,19 @@ struct ProcessActionsMenu: View {
 }
 
 struct ProcessActions: View {
-    let process: ProcessInfoRow
+    let group: ProcessGroup
     let model: ProcessModel
     var origin = "window"
 
     var body: some View {
         Button {
             model.actionOrigin = origin
-            Task { await model.explain(process) }
+            Task { await model.explain(group) }
         } label: { Label("Por que está em execução?", systemImage: "lightbulb") }
-        Button { model.copyPID(process) } label: { Label("Copiar PID", systemImage: "doc.on.doc") }
-        Button { model.reveal(process) } label: { Label("Mostrar no Finder", systemImage: "folder") }
+        Button { model.copyPID(group.main) } label: { Label("Copiar PID", systemImage: "doc.on.doc") }
+        Button { model.reveal(group.main) } label: { Label("Mostrar no Finder", systemImage: "folder") }
         Divider()
-        Button { model.actionOrigin = origin; model.pendingKill = process } label: { Label("Encerrar…", systemImage: "xmark.circle") }
+        Button { model.actionOrigin = origin; model.pendingKill = group } label: { Label("Encerrar…", systemImage: "xmark.circle") }
     }
 }
 
@@ -417,12 +540,13 @@ private struct ProcessDetailsSheet: View {
 
     var body: some View {
         let p = details.process
+        let g = details.group
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 12) {
                 Image(systemName: "lightbulb.fill")
                     .font(.system(size: 22))
                     .foregroundStyle(Palette.memory)
-                Text(p.name).font(.system(size: 20, weight: .semibold))
+                Text(g.name).font(.system(size: 20, weight: .semibold))
             }
             Text(details.reason)
                 .font(.system(size: 14))
@@ -430,8 +554,9 @@ private struct ProcessDetailsSheet: View {
                 row("PID", "\(p.pid)")
                 row("Processo pai", details.parent.map { "\($0.name) (\($0.pid))" } ?? "PID \(p.ppid)")
                 row("Usuário", p.user)
-                row("Memória", Bytes.mem(p.memoryBytes))
-                row("CPU", "\(Fmt.dec(p.cpu))%")
+                if g.count > 1 { row("Processos", "\(g.count) (o principal e os auxiliares)") }
+                row(g.count > 1 ? "Memória total" : "Memória", Bytes.mem(g.memoryBytes))
+                row(g.count > 1 ? "CPU total" : "CPU", "\(Fmt.dec(g.cpu))%")
                 if !details.started.isEmpty { row("Iniciado em", details.started) }
                 row("Caminho", p.path)
             }

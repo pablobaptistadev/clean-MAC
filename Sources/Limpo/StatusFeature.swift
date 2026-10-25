@@ -807,7 +807,7 @@ struct AlertBanner: View {
                 let p = AppStore.shared.processes
                 if let row = p.all.first(where: { Int($0.pid) == alert.pid }) {
                     p.actionOrigin = "window"
-                    p.pendingKill = row
+                    p.pendingKill = ProcessGroup(single: row)
                 }
             }
         }
