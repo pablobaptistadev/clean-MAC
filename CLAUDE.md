@@ -10,6 +10,9 @@ Responder sempre em português (PT-BR), direto ao ponto.
 3. Se o build falhar, leia o erro, corrija e rode de novo até passar.
 4. Para gerar instalador: `./build-app.sh --dmg` (ou `./make-dmg.sh`) → `~/Downloads/Limpo-<versão>.dmg`.
 5. No fim, confirme a versão instalada: `defaults read /Applications/Limpo.app/Contents/Info CFBundleShortVersionString`.
+6. Com a versão nova instalada, **commite e dê push** no GitHub (`github.com/pablobaptistadev/clean-MAC`, branch `main`):
+   `git add -A && git commit -m "Limpo <versão>: <resumo da mudança>" && git push`.
+   O `.gitignore` já deixa de fora `.build/`, `.app` e `.dmg`. Se o push falhar, avise e não force (`--force`).
 
 ## Regras de código
 - **Não usar `@State`, `@Bindable` nem outras macros do SwiftUI**: as Command Line Tools do macOS 27 não trazem o plugin `SwiftUIMacros` e o build quebra. Estado fica nos models `@Observable` (Observation funciona) e bindings são feitos com `Binding(get:set:)`.
