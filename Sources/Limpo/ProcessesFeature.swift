@@ -199,13 +199,23 @@ final class ProcessModel {
             return ProcessInfoRow(
                 pid: pid,
                 ppid: ppid,
-                memoryBytes: rss * 1024,
+                memoryBytes: footprint(pid) ?? rss * 1024,
                 cpu: cpu,
                 user: String(fields[4]),
                 path: path,
                 name: displayName(pid: pid, path: path)
             )
         }
+    }
+
+    /// Memória como o Monitor de Atividade mostra (phys_footprint): não conta de novo a memória compartilhada,
+    /// por isso a soma por app fica certa. Processos de outros usuários (root) não permitem a leitura e ficam com o RSS do `ps`.
+    nonisolated static func footprint(_ pid: Int32) -> Int64? {
+        var info = rusage_info_v2()
+        let result = withUnsafeMutablePointer(to: &info) { ptr in
+            ptr.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(pid, RUSAGE_INFO_V2, $0) }
+        }
+        return result == 0 ? Int64(info.ri_phys_footprint) : nil
     }
 
     nonisolated static func displayName(pid: Int32, path: String) -> String {
