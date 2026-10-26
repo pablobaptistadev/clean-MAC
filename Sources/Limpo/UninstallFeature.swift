@@ -136,11 +136,28 @@ final class UninstallModel {
 
         if !confirmed, tail.contains("confirm"), tail.contains("cancel") {
             confirmed = true
-            session?.send("y")
+            answerConfirmation(attempt: 1)
         }
 
         let prompts = text.components(separatedBy: "Password:").count - 1
         if prompts > passwordsSent { needsPassword = true }
+    }
+
+    /// O Mole joga fora o que chega logo depois de mostrar "Enter confirm, ESC cancel" (drain_pending_input),
+    /// então responder na hora fazia a desinstalação travar. O Enter vai com atraso e é repetido
+    /// enquanto a pergunta continuar sendo a última linha.
+    private func answerConfirmation(attempt: Int) {
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(attempt == 1 ? 800 : 2500))
+            guard let self, self.running, self.waitingForConfirmation else { return }
+            self.session?.send("\r")
+            if attempt < 4 { self.answerConfirmation(attempt: attempt + 1) }
+        }
+    }
+
+    private var waitingForConfirmation: Bool {
+        let last = log.components(separatedBy: "\n").last { !$0.trimmingCharacters(in: .whitespaces).isEmpty } ?? ""
+        return last.contains("confirm") && last.contains("cancel")
     }
 
     private func didExit(_ code: Int32) {

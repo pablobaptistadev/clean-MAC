@@ -83,10 +83,8 @@ final class ProcessModel {
     var query = ""
     var onlyMine = false
     var error: String?
-    var pendingKill: ProcessGroup?
+    /// Detalhes de "Por que está em execução?" abertos na janela (no monitor vira um NSAlert).
     var info: ProcessDetails?
-    /// Qual tela pediu a ação (janela ou monitor), para o alerta aparecer só nela.
-    var actionOrigin = "window"
     /// Grupos abertos na lista (mostram cada processo do app).
     var expanded: Set<String> = []
 
@@ -249,20 +247,101 @@ final class ProcessModel {
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: target)])
     }
 
-    func terminate(_ g: ProcessGroup, force: Bool) {
-        // App aberto: pede para ele fechar e os auxiliares saem junto. Sem app, sinaliza cada processo do grupo.
-        if let app = NSRunningApplication(processIdentifier: g.main.pid) {
-            _ = force ? app.forceTerminate() : app.terminate()
-            if force {
-                for p in g.members where p.pid != g.main.pid { kill(p.pid, SIGKILL) }
-            }
-        } else {
-            for p in g.members { kill(p.pid, force ? SIGKILL : SIGTERM) }
+    enum CloseOutcome { case closed, stillRunning, needsAdmin }
+
+    /// Pergunta antes de encerrar e confere o resultado. NSAlert funciona igual na janela e no monitor da barra.
+    func confirmTerminate(_ g: ProcessGroup) {
+        Task { @MainActor in
+            let alert = NSAlert()
+            alert.messageText = "Encerrar \(g.name)?"
+            alert.informativeText = g.killWarning
+            alert.addButton(withTitle: "Encerrar")
+            alert.addButton(withTitle: "Forçar encerramento")
+            alert.addButton(withTitle: "Cancelar")
+            NSApp.activate(ignoringOtherApps: true)
+            let answer = alert.runModal()
+            guard answer != .alertThirdButtonReturn else { return }
+            await terminate(g, force: answer == .alertSecondButtonReturn)
         }
-        Task {
-            try? await Task.sleep(for: .milliseconds(600))
+    }
+
+    func terminate(_ g: ProcessGroup, force: Bool) async {
+        switch await close(g, force: force) {
+        case .closed:
+            return
+        case .stillRunning:
+            if force {
+                inform("\(g.name) não fechou", "O macOS não deixou encerrar o processo.")
+            } else if ask("\(g.name) ainda está aberto",
+                          "Ele pode estar esperando você salvar algo ou não respondeu ao pedido para fechar. Forçar o encerramento? Alterações não salvas serão perdidas.",
+                          button: "Forçar encerramento") {
+                await terminate(g, force: true)
+            }
+        case .needsAdmin:
+            let owner = g.members.first { $0.user != NSUserName() }?.user ?? "root"
+            guard ask("\(g.name) é um processo do sistema",
+                      "Ele roda como \(owner) e só fecha com a senha de administrador. O macOS pode abri-lo de novo. Encerrar mesmo assim?",
+                      button: "Encerrar com senha…") else { return }
+            killAsAdmin(g.members.map(\.pid))
             await refresh()
         }
+    }
+
+    /// Manda o grupo fechar e espera até 4 s para conferir se fechou.
+    func close(_ g: ProcessGroup, force: Bool) async -> CloseOutcome {
+        let pids = g.members.map(\.pid)
+        if pids.contains(where: { kill($0, 0) != 0 && errno == EPERM }) { return .needsAdmin }
+        var watched = pids
+        if force {
+            NSRunningApplication(processIdentifier: g.main.pid)?.forceTerminate()
+            for pid in pids { kill(pid, SIGKILL) }
+        } else if let app = NSRunningApplication(processIdentifier: g.main.pid), app.activationPolicy == .regular {
+            // App com ícone no Dock: fecha como ⌘Q e os auxiliares saem junto; basta conferir o principal.
+            app.terminate()
+            watched = [g.main.pid]
+        } else {
+            // Auxiliares e processos sem janela ignoram o pedido de "sair" do macOS: vai sinal direto.
+            for pid in pids { kill(pid, SIGTERM) }
+        }
+        var waited = 0
+        while waited < 20, watched.contains(where: Self.isAlive) {
+            try? await Task.sleep(for: .milliseconds(200))
+            waited += 1
+        }
+        await refresh()
+        return watched.contains(where: Self.isAlive) ? .stillRunning : .closed
+    }
+
+    nonisolated static func isAlive(_ pid: Int32) -> Bool {
+        kill(pid, 0) == 0 || errno == EPERM
+    }
+
+    /// Processos de outro usuário (root) só fecham com a senha de administrador, pedida pelo próprio macOS.
+    private func killAsAdmin(_ pids: [Int32]) {
+        let list = pids.map(String.init).joined(separator: " ")
+        var error: NSDictionary?
+        NSAppleScript(source: "do shell script \"/bin/kill -9 \(list)\" with administrator privileges")?.executeAndReturnError(&error)
+        if let error, error[NSAppleScript.errorNumber] as? Int != -128 {
+            inform("Não foi possível encerrar", error[NSAppleScript.errorMessage] as? String ?? "Erro desconhecido.")
+        }
+    }
+
+    private func ask(_ title: String, _ text: String, button: String) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = text
+        alert.addButton(withTitle: button)
+        alert.addButton(withTitle: "Cancelar")
+        NSApp.activate(ignoringOtherApps: true)
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    private func inform(_ title: String, _ text: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = text
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
     }
 
     func explain(_ g: ProcessGroup) async {
@@ -271,6 +350,21 @@ final class ProcessModel {
         let started = (try? await Shell.run("/bin/ps", ["-o", "lstart=", "-p", "\(p.pid)"]))?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         info = ProcessDetails(group: g, parent: parent, started: started)
+    }
+
+    /// "Por que está em execução?" no monitor da barra: um NSAlert em vez da folha da janela.
+    func explainInAlert(_ g: ProcessGroup) async {
+        await explain(g)
+        guard let d = info else { return }
+        info = nil
+        let count = g.count > 1 ? " · \(g.count) processos" : ""
+        let alert = NSAlert()
+        alert.messageText = g.name
+        alert.informativeText = "\(d.reason)\n\nPID \(d.process.pid) · \(Bytes.mem(g.memoryBytes))\(count)\(d.parent.map { " · pai: \($0.name)" } ?? "")\n\(d.process.path)"
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Copiar PID")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertSecondButtonReturn { copyPID(d.process) }
     }
 }
 
@@ -338,23 +432,7 @@ struct ProcessListView: View {
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.hairline, lineWidth: 1))
         .onAppear { model.attach() }
         .onDisappear { model.detach() }
-        .alert(
-            "Encerrar \(model.pendingKill?.name ?? "")?",
-            isPresented: Binding(get: { model.pendingKill != nil && model.actionOrigin == "window" }, set: { if !$0 { model.pendingKill = nil } })
-        ) {
-            Button("Cancelar", role: .cancel) { model.pendingKill = nil }
-            Button("Encerrar") {
-                if let p = model.pendingKill { model.terminate(p, force: false) }
-                model.pendingKill = nil
-            }
-            Button("Forçar encerramento", role: .destructive) {
-                if let p = model.pendingKill { model.terminate(p, force: true) }
-                model.pendingKill = nil
-            }
-        } message: {
-            Text(model.pendingKill?.killWarning ?? "")
-        }
-        .sheet(item: Binding(get: { model.actionOrigin == "window" ? model.info : nil }, set: { model.info = $0 })) { details in
+        .sheet(item: Binding(get: { model.info }, set: { model.info = $0 })) { details in
             ProcessDetailsSheet(details: details) { model.info = nil }
         }
     }
@@ -534,13 +612,12 @@ struct ProcessActions: View {
 
     var body: some View {
         Button {
-            model.actionOrigin = origin
-            Task { await model.explain(group) }
+            Task { origin == "monitor" ? await model.explainInAlert(group) : await model.explain(group) }
         } label: { Label("Por que está em execução?", systemImage: "lightbulb") }
         Button { model.copyPID(group.main) } label: { Label("Copiar PID", systemImage: "doc.on.doc") }
         Button { model.reveal(group.main) } label: { Label("Mostrar no Finder", systemImage: "folder") }
         Divider()
-        Button { model.actionOrigin = origin; model.pendingKill = group } label: { Label("Encerrar…", systemImage: "xmark.circle") }
+        Button { model.confirmTerminate(group) } label: { Label("Encerrar…", systemImage: "xmark.circle") }
     }
 }
 

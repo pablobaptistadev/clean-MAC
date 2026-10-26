@@ -363,34 +363,6 @@ struct MonitorView: View {
             model.detach()
             procs.detach()
         }
-        .alert(
-            "Encerrar \(procs.pendingKill?.name ?? "")?",
-            isPresented: Binding(get: { procs.pendingKill != nil && procs.actionOrigin == "monitor" }, set: { if !$0 { procs.pendingKill = nil } })
-        ) {
-            Button("Cancelar", role: .cancel) { procs.pendingKill = nil }
-            Button("Encerrar") {
-                if let p = procs.pendingKill { procs.terminate(p, force: false) }
-                procs.pendingKill = nil
-            }
-            Button("Forçar encerramento", role: .destructive) {
-                if let p = procs.pendingKill { procs.terminate(p, force: true) }
-                procs.pendingKill = nil
-            }
-        } message: {
-            Text(procs.pendingKill?.killWarning ?? "")
-        }
-        .alert(
-            procs.info?.group.name ?? "",
-            isPresented: Binding(get: { procs.info != nil && procs.actionOrigin == "monitor" }, set: { if !$0 { procs.info = nil } })
-        ) {
-            Button("OK") { procs.info = nil }
-            Button("Copiar PID") { if let p = procs.info?.process { procs.copyPID(p) }; procs.info = nil }
-        } message: {
-            if let d = procs.info {
-                let count = d.group.count > 1 ? " · \(d.group.count) processos" : ""
-                Text("\(d.reason)\n\nPID \(d.process.pid) · \(Bytes.mem(d.group.memoryBytes))\(count)\(d.parent.map { " · pai: \($0.name)" } ?? "")\n\(d.process.path)")
-            }
-        }
     }
 
     private func header(_ s: StatusSnapshot) -> some View {
