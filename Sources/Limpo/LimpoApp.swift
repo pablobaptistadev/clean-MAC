@@ -70,6 +70,7 @@ final class AppStore {
     let processes = ProcessModel()
     let history = HistoryModel()
     let settings = SettingsModel()
+    let updates = UpdateModel()
     let purge = ScanListModel(scanner: { await PurgeScanner.scan() })
     let installers = ScanListModel(scanner: { await InstallerScanner.scan() })
     let external = ExternalCleanModel()
@@ -92,6 +93,11 @@ struct RootView: View {
                 MissingMoleView()
             } else {
                 TabHeader()
+                if store.updates.bannerVisible {
+                    UpdateBanner()
+                        .padding(.horizontal, 32)
+                        .padding(.vertical, 8)
+                }
                 content
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }

@@ -34,6 +34,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let request = UNNotificationRequest(identifier: alert.id, content: content, trigger: nil)
             UNUserNotificationCenter.current().add(request)
         }
+        store.updates.onFound = { release in
+            let content = UNMutableNotificationContent()
+            content.title = "Limpo \(release.version) disponível"
+            content.body = "Abra o Limpo e clique em Atualizar. Ele baixa a versão nova, troca o app e reabre sozinho."
+            let request = UNNotificationRequest(identifier: "update-\(release.version)", content: content, trigger: nil)
+            UNUserNotificationCenter.current().add(request)
+        }
+        store.updates.start()
         showMainWindow(nil)
     }
 
@@ -162,6 +170,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         awake.state = store.keepAwake.isOn ? .on : .off
         menu.addItem(awake)
         menu.addItem(entry("Atualizar o Mole", symbol: "arrow.triangle.2.circlepath", action: #selector(updateMole(_:))))
+        let updates = store.updates
+        let limpoUpdate = updates.phase == .available
+            ? entry("Atualizar o Limpo para \(updates.release?.version ?? "")…", symbol: "arrow.down.circle", action: #selector(installUpdate(_:)))
+            : entry("Procurar atualizações do Limpo…", symbol: "arrow.down.circle", action: #selector(checkForUpdates(_:)))
+        menu.addItem(limpoUpdate)
         menu.addItem(entry("Sobre o Limpo", symbol: "info.circle", action: #selector(about(_:))))
         menu.addItem(.separator())
         let quit = entry("Encerrar Limpo", symbol: "rectangle.portrait.and.arrow.right", action: #selector(quit(_:)))
@@ -221,6 +234,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             NSApp.activate(ignoringOtherApps: true)
             alert.runModal()
         }
+    }
+
+    @objc private func checkForUpdates(_ sender: Any?) {
+        Task {
+            await store.updates.check(manual: true)
+            if store.updates.phase == .available {
+                showMainWindow(nil)
+                return
+            }
+            let alert = NSAlert()
+            alert.messageText = store.updates.phase == .upToDate ? "O Limpo está atualizado" : "Atualizações do Limpo"
+            alert.informativeText = store.updates.statusText
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
+        }
+    }
+
+    @objc private func installUpdate(_ sender: Any?) {
+        showMainWindow(nil)
+        store.updates.dismissed = nil
+        Task { await store.updates.install() }
     }
 
     @objc private func about(_ sender: Any?) {

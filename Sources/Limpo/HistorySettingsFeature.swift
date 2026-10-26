@@ -301,6 +301,27 @@ struct SettingsSheet: View {
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
+                    let updates = store.updates
+                    Card {
+                        VStack(alignment: .leading, spacing: 12) {
+                            row("Atualizações do Limpo", updates.statusText) {
+                                if updates.phase == .available {
+                                    Button("Atualizar para \(updates.release?.version ?? "")") {
+                                        updates.dismissed = nil
+                                        Task { await updates.install() }
+                                    }
+                                } else {
+                                    Button("Procurar agora") { Task { await updates.check(manual: true) } }
+                                        .disabled(updates.phase == .checking || updates.phase == .installing)
+                                }
+                            }
+                            Divider().overlay(Theme.hairline)
+                            row("Procurar automaticamente", "Ao abrir o Limpo e uma vez por dia, na última versão publicada no GitHub") {
+                                Toggle("", isOn: Binding(get: { updates.autoCheck }, set: { updates.autoCheck = $0 }))
+                                    .toggleStyle(.switch).labelsHidden()
+                            }
+                        }
+                    }
                     Card {
                         VStack(alignment: .leading, spacing: 12) {
                             row("Mole CLI", model.version.isEmpty ? (MoleCLI.locate() ?? "não encontrado") : model.version) {

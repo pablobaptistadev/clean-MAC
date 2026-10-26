@@ -20,6 +20,11 @@ App nativo (SwiftUI) para macOS com visual grafite, usando o **Mole CLI** (githu
 - Clique: monitor em tempo real (CPU, GPU, memória, disco, rede, ventoinha, Bluetooth, top apps por memória (processos somados por app), contadores do histórico, Tela ligada)
 - Clique direito: menu com todas as seções, Histórico, Ajustes, Manter tela ligada, Atualizar o Mole
 
+## Atualizações
+O Limpo procura uma versão nova ao abrir e uma vez por dia, na última Release de github.com/pablobaptistadev/clean-MAC.
+Quando acha, mostra um aviso na janela (e uma notificação): **Atualizar** baixa o `.dmg`, troca o app e reabre o Limpo.
+Também em Ajustes › Atualizações do Limpo e no menu da barra (Procurar atualizações do Limpo…).
+
 Tudo que é removido pelo app vai para o Lixo.
 
 ## Requisitos

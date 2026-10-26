@@ -33,4 +33,6 @@ Levantado do código do repositório tw93/Mole (dispatcher `mole`, `bin/*.sh`, `
 | `--debug` | não exposto | só polui a saída que o app lê |
 | `mo touchid` interativo, seleção do `mo slim` | Terminal | o Mole exige terminal real |
 
+Fora do Mole: atualização do próprio Limpo pelas Releases do GitHub (Ajustes, aviso na janela, menu da barra).
+
 Fora do CLI (não dá para fazer só com o Mole): controle de ventoinha.
