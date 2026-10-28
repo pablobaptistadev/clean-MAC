@@ -4,8 +4,8 @@ Levantado do código do repositório tw93/Mole (dispatcher `mole`, `bin/*.sh`, `
 
 | Comando / opção do Mole | No Limpo | Como |
 |---|---|---|
-| `mo clean` | Limpar › Sistema | prévia com `--dry-run`, depois roda |
-| `mo clean --dry-run` (gera `~/.config/mole/clean-list.txt`) | Limpar › Sistema › "Ver caminhos" | lista os caminhos de cada seção |
+| `mo clean` | Limpeza rápida | prévia com `--dry-run` (anel de progresso), depois roda; o que foi desmarcado vira proteção temporária só durante a limpeza |
+| `mo clean --dry-run` (gera `~/.config/mole/clean-list.txt`) | Limpeza rápida › "Pronto para limpar" | categorias com caixa de marcar e caminhos (proteger / mostrar no Finder); o Lixo vem primeiro quando tem itens |
 | `mo clean --whitelist` | Botão "Proteger" por caminho + Ajustes › Proteções da limpeza | grava `~/.config/mole/whitelist` (já com os padrões do Mole) |
 | `mo clean --external PATH` | Limpar › Disco externo | prévia + limpeza + ejetar |
 | `mo purge` / `--paths` / `--include-empty` / `--yes` | Limpar › Projetos + Ajustes › Pastas de projetos | varredura nativa com as mesmas pastas e alvos; vai para o Lixo |
@@ -15,9 +15,9 @@ Levantado do código do repositório tw93/Mole (dispatcher `mole`, `bin/*.sh`, `
 | `mo analyze` (visão geral + "espaço oculto") | Analisar › Explorador | começa na visão geral; navega por pasta; menu Discos |
 | `mo analyze --json PATH` | Analisar › Explorador | drill-down, mover para o Lixo, mostrar no Finder |
 | Arquivos grandes do `analyze` | Analisar › Arquivos grandes | por categoria |
-| `mo uninstall --list` / `NAME…` / `--dry-run` | Apps › Desinstalar | plano antes, confirmação no app |
-| `mo uninstall --with-data` | Apps › "Incluir dados pessoais" | |
-| `mo uninstall --permanent` | Apps › "Apagar sem passar pelo Lixo" | |
+| `mo uninstall --list` / `NAME…` / `--dry-run` | Desinstalar apps (filtros: todos, selecionados, grandes, Homebrew) | plano antes, confirmação no app |
+| `mo uninstall --with-data` | Desinstalar apps › Opções › "Incluir dados pessoais" | |
+| `mo uninstall --permanent` | Desinstalar apps › Opções › "Apagar sem passar pelo Lixo" | |
 | `mo slim` / `--dry-run` | Apps › Reduzir (Intel) | lista no app; escolha no Terminal (o Mole só seleciona em terminal) |
 | `mo status --watch --interval` | Status + Monitor da barra | um processo contínuo em vez de consultas |
 | `mo status` CPU, GPU, memória, disco, I/O, rede, proxy, térmico, ventoinha, sensores, bateria, Bluetooth, Lixo, zumbis | Status + Monitor | cards coloridos |

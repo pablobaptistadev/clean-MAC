@@ -406,9 +406,6 @@ struct CleanTabView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            SubTabs(items: CleanMode.allCases.map { (id: $0.rawValue, title: $0.title) }, selected: store.cleanMode.rawValue) {
-                store.cleanMode = CleanMode(rawValue: $0) ?? .system
-            }
             switch store.cleanMode {
             case .system:
                 CleanView()
@@ -434,33 +431,5 @@ struct CleanTabView: View {
                 ExternalCleanView()
             }
         }
-    }
-}
-
-struct SubTabs: View {
-    let items: [(id: String, title: String)]
-    let selected: String
-    let onSelect: (String) -> Void
-
-    var body: some View {
-        HStack(spacing: 2) {
-            ForEach(items, id: \.id) { item in
-                let active = item.id == selected
-                Button { onSelect(item.id) } label: {
-                    Text(item.title)
-                        .font(.system(size: 12.5, weight: .medium))
-                        .foregroundStyle(active ? Theme.text : Theme.muted)
-                        .padding(.horizontal, 14)
-                        .frame(height: 26)
-                        .background(Capsule().fill(active ? Color.white.opacity(0.12) : .clear))
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(3)
-        .background(Capsule().fill(Color.black.opacity(0.2)))
-        .padding(.top, 6)
-        .padding(.bottom, 4)
     }
 }

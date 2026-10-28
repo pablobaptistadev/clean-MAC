@@ -88,24 +88,25 @@ struct RootView: View {
     @Environment(AppStore.self) private var store
 
     var body: some View {
-        VStack(spacing: 0) {
-            if store.moPath == nil {
-                MissingMoleView()
-            } else {
-                TabHeader()
-                if store.updates.bannerVisible {
-                    UpdateBanner()
-                        .padding(.horizontal, 32)
-                        .padding(.vertical, 8)
+        HStack(spacing: 0) {
+            Sidebar()
+            VStack(spacing: 0) {
+                if store.moPath == nil {
+                    MissingMoleView()
+                } else {
+                    if store.updates.bannerVisible {
+                        UpdateBanner()
+                            .padding(.horizontal, 24)
+                            .padding(.top, 34)
+                            .padding(.bottom, 4)
+                    }
+                    content
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                content
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Theme.main)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(
-            LinearGradient(colors: [Color(white: 0.15), Theme.main], startPoint: .top, endPoint: .center)
-        )
         .foregroundStyle(Theme.text)
         .ignoresSafeArea()
         .sheet(item: Binding(get: { store.sheet }, set: { store.sheet = $0 })) { sheet in
@@ -128,78 +129,134 @@ struct RootView: View {
     }
 }
 
-struct TabHeader: View {
-    @Environment(AppStore.self) private var store
+/// Itens da barra lateral: cada um leva a uma seção (e ao modo dela), como a lista do BuhoCleaner.
+enum SidebarItem: String, CaseIterable, Identifiable {
+    case clean, uninstall, largeFiles, explorer, projects, installers, optimize, status, external, slim
 
-    var body: some View {
-        HStack(spacing: 2) {
-            AppGlyph(size: 34)
-                .padding(.trailing, 6)
-            ForEach(AppSection.allCases) { section in
-                let active = store.section == section
-                Button {
-                    withAnimation(.snappy(duration: 0.22)) { store.section = section }
-                } label: {
-                    Text(section.tab)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(active ? Color.black : Color(white: 0.83))
-                        .padding(.horizontal, 20)
-                        .frame(height: 34)
-                        .background(
-                            Capsule()
-                                .fill(active ? Color(white: 0.96) : .clear)
-                                .shadow(color: .black.opacity(active ? 0.35 : 0), radius: 6, y: 2)
-                        )
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(.plain)
-            }
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .clean: return "Limpeza rápida"
+        case .uninstall: return "Desinstalar apps"
+        case .largeFiles: return "Arquivos grandes"
+        case .explorer: return "Espaço em disco"
+        case .projects: return "Projetos"
+        case .installers: return "Instaladores"
+        case .optimize: return "Otimizar"
+        case .status: return "Status"
+        case .external: return "Disco externo"
+        case .slim: return "Reduzir apps (Intel)"
         }
-        .padding(4)
-        .background(
-            Capsule().fill(Color.white.opacity(0.06))
-                .overlay(Capsule().strokeBorder(Theme.hairline, lineWidth: 1))
-        )
-        .frame(maxWidth: .infinity)
-        .overlay(alignment: .trailing) {
-            HStack(spacing: 14) {
-                headerButton("clock.arrow.circlepath", "Histórico") { store.sheet = .history }
-                headerButton("gearshape", "Ajustes") { store.sheet = .settings }
-            }
-            .padding(.trailing, 20)
-        }
-        .padding(.top, 14)
-        .padding(.bottom, 6)
     }
 
-    private func headerButton(_ symbol: String, _ help: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(Theme.muted)
-                .frame(width: 30, height: 30)
-                .background(Circle().fill(Color.white.opacity(0.06)))
-                .contentShape(Circle())
+    var symbol: String {
+        switch self {
+        case .clean: return "bolt"
+        case .uninstall: return "trash"
+        case .largeFiles: return "folder"
+        case .explorer: return "chart.pie"
+        case .projects: return "hammer"
+        case .installers: return "shippingbox"
+        case .optimize: return "gauge.with.dots.needle.bottom.50percent"
+        case .status: return "waveform.path.ecg"
+        case .external: return "externaldrive"
+        case .slim: return "scissors"
         }
-        .buttonStyle(.plain)
-        .help(help)
+    }
+
+    @MainActor func isActive(_ store: AppStore) -> Bool {
+        switch self {
+        case .clean: return store.section == .clean && store.cleanMode == .system
+        case .projects: return store.section == .clean && store.cleanMode == .projects
+        case .installers: return store.section == .clean && store.cleanMode == .installers
+        case .external: return store.section == .clean && store.cleanMode == .external
+        case .uninstall: return store.section == .uninstall && store.appsMode == .uninstall
+        case .slim: return store.section == .uninstall && store.appsMode == .slim
+        case .largeFiles: return store.section == .analyze && store.analyzeMode == .largeFiles
+        case .explorer: return store.section == .analyze && store.analyzeMode == .explorer
+        case .optimize: return store.section == .optimize
+        case .status: return store.section == .status
+        }
+    }
+
+    @MainActor func select(_ store: AppStore) {
+        switch self {
+        case .clean: store.section = .clean; store.cleanMode = .system
+        case .projects: store.section = .clean; store.cleanMode = .projects
+        case .installers: store.section = .clean; store.cleanMode = .installers
+        case .external: store.section = .clean; store.cleanMode = .external
+        case .uninstall: store.section = .uninstall; store.appsMode = .uninstall
+        case .slim: store.section = .uninstall; store.appsMode = .slim
+        case .largeFiles: store.section = .analyze; store.analyzeMode = .largeFiles
+        case .explorer: store.section = .analyze; store.analyzeMode = .explorer
+        case .optimize: store.section = .optimize
+        case .status: store.section = .status
+        }
     }
 }
 
-/// Ícone do Limpo (brilhos sobre grafite), usado na barra de abas.
+struct Sidebar: View {
+    @Environment(AppStore.self) private var store
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 7) {
+                AppGlyph(size: 18)
+                Text("Limpo")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(Theme.accentLight)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 46)
+            .padding(.bottom, 30)
+
+            ForEach(SidebarItem.allCases) { item in
+                row(item.title, item.symbol, active: item.isActive(store)) {
+                    withAnimation(.snappy(duration: 0.2)) { item.select(store) }
+                }
+            }
+            Spacer()
+            row("Histórico", "clock.arrow.circlepath", active: false) { store.sheet = .history }
+            row("Ajustes", "gearshape", active: false) { store.sheet = .settings }
+                .padding(.bottom, 14)
+        }
+        .padding(.horizontal, 11)
+        .frame(width: 200)
+        .frame(maxHeight: .infinity)
+        .background(Theme.sidebar)
+    }
+
+    private func row(_ title: String, _ symbol: String, active: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 9) {
+                Image(systemName: symbol)
+                    .font(.system(size: 12.5))
+                    .frame(width: 16)
+                Text(title)
+                    .font(.system(size: 12.5))
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(Color.white.opacity(active ? 1 : 0.88))
+            .padding(.horizontal, 10)
+            .frame(height: 30)
+            .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.white.opacity(active ? 0.08 : 0)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// Ícone do Limpo (brilhos sobre azul), usado na barra lateral.
 struct AppGlyph: View {
     var size: CGFloat = 34
 
     var body: some View {
-        Circle()
-            .fill(LinearGradient(colors: [Color(white: 0.35), Color(white: 0.17)], startPoint: .top, endPoint: .bottom))
-            .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
+        Image(systemName: "sparkles")
+            .font(.system(size: size * 0.9, weight: .semibold))
+            .foregroundStyle(Theme.accentLight)
             .frame(width: size, height: size)
-            .overlay(
-                Image(systemName: "sparkles")
-                    .font(.system(size: size * 0.48, weight: .semibold))
-                    .foregroundStyle(.white)
-            )
     }
 }
 

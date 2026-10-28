@@ -132,9 +132,6 @@ struct AnalyzeTabView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            SubTabs(items: AnalyzeMode.allCases.map { (id: $0.rawValue, title: $0.title) }, selected: store.analyzeMode.rawValue) {
-                store.analyzeMode = AnalyzeMode(rawValue: $0) ?? .explorer
-            }
             switch store.analyzeMode {
             case .explorer: ExplorerView()
             case .largeFiles: LargeFilesView()

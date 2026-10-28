@@ -23,6 +23,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         NSApp.appearance = NSAppearance(named: .darkAqua)
+        // Uma limpeza interrompida não deixa proteções temporárias para trás.
+        Whitelist.removeTemporary()
         setupStatusItem()
         if UserDefaults.standard.bool(forKey: "backgroundMonitor") { store.status.attach() }
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }

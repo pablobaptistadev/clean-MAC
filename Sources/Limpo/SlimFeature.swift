@@ -131,9 +131,6 @@ struct AppsTabView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            SubTabs(items: AppsMode.allCases.map { (id: $0.rawValue, title: $0.title) }, selected: store.appsMode.rawValue) {
-                store.appsMode = AppsMode(rawValue: $0) ?? .uninstall
-            }
             switch store.appsMode {
             case .uninstall: UninstallView()
             case .slim: SlimView()

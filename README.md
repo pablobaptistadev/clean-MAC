@@ -1,6 +1,6 @@
 # Limpo
 
-App nativo (SwiftUI) para macOS com visual grafite, usando o **Mole CLI** (github.com/tw93/Mole) como motor.
+App nativo (SwiftUI) para macOS com layout no estilo do BuhoCleaner (barra lateral, área azul-marinho), usando o **Mole CLI** (github.com/tw93/Mole) como motor.
 
 ## Abas
 - **Limpar**

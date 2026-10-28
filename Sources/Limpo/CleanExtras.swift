@@ -61,6 +61,33 @@ enum Whitelist {
         write(cleanFile, cleanEntries().filter { $0 != tilde && $0 != path })
     }
 
+    private static let temporaryKey = "cleanTemporaryWhitelist"
+    private static let temporaryCreatedKey = "cleanTemporaryWhitelistCreatedFile"
+
+    /// Protege só durante uma limpeza o que o usuário desmarcou. O que foi acrescentado fica anotado
+    /// para `removeTemporary()` desfazer depois, mesmo se o app fechar no meio da limpeza.
+    static func protectTemporarily(_ paths: [String]) {
+        removeTemporary()
+        let entries = cleanEntries()
+        let added = Array(Set(paths.map(FS.tilde))).filter { !entries.contains($0) }
+        guard !added.isEmpty else { return }
+        UserDefaults.standard.set(added, forKey: temporaryKey)
+        UserDefaults.standard.set(!FileManager.default.fileExists(atPath: cleanFile), forKey: temporaryCreatedKey)
+        write(cleanFile, entries + added)
+    }
+
+    static func removeTemporary() {
+        guard let added = UserDefaults.standard.stringArray(forKey: temporaryKey), !added.isEmpty else { return }
+        if UserDefaults.standard.bool(forKey: temporaryCreatedKey) {
+            // O arquivo não existia antes: apagar devolve o Mole aos padrões dele.
+            try? FileManager.default.removeItem(atPath: cleanFile)
+        } else {
+            write(cleanFile, cleanEntries().filter { !added.contains($0) })
+        }
+        UserDefaults.standard.removeObject(forKey: temporaryKey)
+        UserDefaults.standard.removeObject(forKey: temporaryCreatedKey)
+    }
+
     // Otimização: uma linha por tarefa que deve ser pulada
     static func skippedTasks() -> Set<String> { Set(lines(optimizeFile)) }
 

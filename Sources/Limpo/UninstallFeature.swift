@@ -17,10 +17,16 @@ struct InstalledApp: Decodable, Identifiable, Hashable {
 final class UninstallModel {
     enum Phase { case idle, loading, list }
 
+    enum Filter: String, CaseIterable { case all, selected, large, homebrew }
+    enum Sort { case size, name }
+
     var phase: Phase = .idle
     var apps: [InstalledApp] = []
     var selected: Set<String> = []
     var query = ""
+    var filter: Filter = .all
+    var sort: Sort = .size
+    var expanded: Set<String> = []
     var error: String?
 
     // Folha de confirmação / execução
@@ -45,9 +51,26 @@ final class UninstallModel {
     var log: String { ANSI.strip(rawLog) }
 
     var filtered: [InstalledApp] {
-        query.isEmpty ? apps : apps.filter {
-            $0.name.localizedCaseInsensitiveContains(query) || $0.bundle_id.localizedCaseInsensitiveContains(query)
+        let list = apps(in: filter).filter {
+            query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) || $0.bundle_id.localizedCaseInsensitiveContains(query)
         }
+        switch sort {
+        case .size: return list.sorted { $0.bytes > $1.bytes }
+        case .name: return list.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        }
+    }
+
+    func apps(in filter: Filter) -> [InstalledApp] {
+        switch filter {
+        case .all: return apps
+        case .selected: return apps.filter { selected.contains($0.id) }
+        case .large: return apps.filter { $0.bytes >= 1_000_000_000 }
+        case .homebrew: return apps.filter { $0.source == "Homebrew" }
+        }
+    }
+
+    func toggleExpanded(_ app: InstalledApp) {
+        if expanded.contains(app.id) { expanded.remove(app.id) } else { expanded.insert(app.id) }
     }
     var selectedApps: [InstalledApp] { apps.filter { selected.contains($0.id) } }
     var selectedBytes: Int64 { selectedApps.reduce(0) { $0 + $1.bytes } }
@@ -178,31 +201,35 @@ struct UninstallView: View {
         let model = store.uninstall
 
         VStack(spacing: 0) {
+            titleBar(model)
             switch model.phase {
             case .idle, .loading:
                 BusyView(title: "Listando aplicativos…", subtitle: "Calculando tamanhos.")
             case .list:
-                header(model)
-                if let error = model.error {
-                    Text(error).foregroundStyle(Theme.danger).padding()
-                }
-                ScrollView {
-                    LazyVStack(spacing: 2) {
-                        ForEach(model.filtered) { app in
-                            AppRow(app: app, selected: model.selected.contains(app.id)) {
-                                model.toggle(app)
+                HStack(spacing: 0) {
+                    filters(model)
+                    VStack(spacing: 0) {
+                        listHeader(model)
+                        if let error = model.error {
+                            Text(error).foregroundStyle(Theme.danger).padding()
+                        }
+                        ScrollView {
+                            LazyVStack(spacing: 0) {
+                                ForEach(model.filtered) { app in
+                                    AppRow(app: app, model: model)
+                                }
                             }
+                            .padding(.horizontal, 12)
+                            .padding(.bottom, 12)
                         }
                     }
-                    .padding(.horizontal, 24)
                 }
                 BottomBar(
                     selected: model.selectedBytes,
                     total: model.totalBytes,
                     selectedLabel: "Selecionado",
-                    button: "Desinstalar",
-                    enabled: !model.selected.isEmpty,
-                    destructive: true
+                    button: "Remover",
+                    enabled: !model.selected.isEmpty
                 ) {
                     Task { await model.openPreview() }
                 }
@@ -216,77 +243,176 @@ struct UninstallView: View {
         }
     }
 
-    private func header(_ model: UninstallModel) -> some View {
-        return HStack(spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Desinstalar Apps").font(.system(size: 26, weight: .semibold))
-                Text("Remove o app junto com preferências, caches e restos. Você revisa tudo antes.")
+    /// Barra de título como a do BuhoCleaner: nome da tela no centro e busca à direita.
+    private func titleBar(_ model: UninstallModel) -> some View {
+        ZStack {
+            Text("Desinstalar apps").font(.system(size: 13, weight: .medium))
+            HStack(spacing: 10) {
+                Spacer()
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted)
+                    TextField("Buscar app", text: Binding(get: { model.query }, set: { model.query = $0 }))
+                        .textFieldStyle(.plain)
+                        .frame(width: 150)
+                }
+                .font(.system(size: 12))
+                .padding(.horizontal, 10)
+                .frame(height: 26)
+                .background(Capsule().fill(Theme.sidebar.opacity(0.35)))
+                Button { Task { await model.load() } } label: { Image(systemName: "arrow.clockwise") }
+                    .buttonStyle(.plain)
                     .foregroundStyle(Theme.muted)
+                    .help("Atualizar lista")
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, 12)
+        .frame(height: 48)
+    }
+
+    private func filters(_ model: UninstallModel) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            filterRow(model, .all, "square.grid.2x2", "Todos os apps")
+            filterRow(model, .selected, "checkmark.circle", "Selecionados")
+            filterRow(model, .large, "externaldrive", "Grandes (1 GB ou mais)")
+            filterRow(model, .homebrew, "mug", "Homebrew")
+            Text("Opções")
+                .font(.system(size: 11.5))
+                .foregroundStyle(Theme.muted)
+                .padding(.top, 22)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 4)
+            optionRow("Incluir dados pessoais do app", on: model.withData, help: "Equivale a --with-data: também remove documentos e dados que o app guardou") {
+                model.withData.toggle()
+            }
+            optionRow("Apagar sem passar pelo Lixo", on: model.permanent, help: "Equivale a --permanent: não dá para desfazer") {
+                model.permanent.toggle()
             }
             Spacer()
-            VStack(alignment: .leading, spacing: 4) {
-                Toggle("Incluir dados pessoais do app", isOn: Binding(get: { model.withData }, set: { model.withData = $0 }))
-                    .help("Equivale a --with-data: também remove documentos e dados que o app guardou")
-                Toggle("Apagar sem passar pelo Lixo", isOn: Binding(get: { model.permanent }, set: { model.permanent = $0 }))
-                    .help("Equivale a --permanent: não dá para desfazer")
-            }
-            .toggleStyle(.checkbox)
-            .font(.system(size: 12))
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted)
-                TextField("Buscar app", text: Binding(get: { model.query }, set: { model.query = $0 }))
-                    .textFieldStyle(.plain)
-                    .frame(width: 200)
-            }
-            .padding(.horizontal, 12)
-            .frame(height: 36)
-            .background(Capsule().fill(Color.black.opacity(0.2)))
-            Button {
-                Task { await model.load() }
-            } label: {
-                Image(systemName: "arrow.clockwise")
-            }
-            .buttonStyle(.plain)
-            .help("Atualizar lista")
         }
-        .padding(.horizontal, 30)
-        .padding(.top, 16)
-        .padding(.bottom, 18)
+        .padding(.horizontal, 10)
+        .padding(.top, 4)
+        .frame(width: 250)
+    }
+
+    private func filterRow(_ model: UninstallModel, _ filter: UninstallModel.Filter, _ symbol: String, _ title: String) -> some View {
+        let active = model.filter == filter
+        return Button { model.filter = filter } label: {
+            HStack(spacing: 8) {
+                Image(systemName: symbol).font(.system(size: 12)).frame(width: 16)
+                Text(title).font(.system(size: 12.5))
+                Spacer()
+                Text("\(model.apps(in: filter).count)").font(.system(size: 12)).foregroundStyle(Theme.muted)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 28)
+            .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(active ? Theme.selection : .clear))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func optionRow(_ title: String, on: Bool, help: String, toggle: @escaping () -> Void) -> some View {
+        Button(action: toggle) {
+            HStack(spacing: 8) {
+                CheckBox(on: on)
+                Text(title).font(.system(size: 12))
+                Spacer()
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 26)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+    }
+
+    private func listHeader(_ model: UninstallModel) -> some View {
+        let titles: [UninstallModel.Filter: String] = [.all: "Todos os apps", .selected: "Selecionados", .large: "Apps grandes", .homebrew: "Instalados pelo Homebrew"]
+        return VStack(alignment: .leading, spacing: 3) {
+            Text(titles[model.filter] ?? "").font(.system(size: 15, weight: .semibold))
+            HStack {
+                Text("Apps instalados no seu Mac. Você revisa tudo antes de remover.")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Theme.muted)
+                Spacer()
+                Menu(model.sort == .size ? "Ordenar por tamanho" : "Ordenar por nome") {
+                    Button("Tamanho") { model.sort = .size }
+                    Button("Nome") { model.sort = .name }
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .font(.system(size: 11.5))
+                .foregroundStyle(Theme.muted)
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 4)
+        .padding(.bottom, 10)
     }
 }
 
 private struct AppRow: View {
     let app: InstalledApp
-    let selected: Bool
-    let toggle: () -> Void
+    let model: UninstallModel
 
     var body: some View {
-        HStack(spacing: 14) {
-            CheckBox(on: selected)
-            FileIcon(path: app.path, size: 38)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(app.name).font(.system(size: 15))
-                Text(app.bundle_id.isEmpty ? app.path : app.bundle_id)
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.muted)
-                    .lineLimit(1)
+        let selected = model.selected.contains(app.id)
+        let open = model.expanded.contains(app.id)
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Button { model.toggle(app) } label: { CheckBox(on: selected) }
+                    .buttonStyle(.plain)
+                FileIcon(path: app.path, size: 26)
+                Text(app.name).font(.system(size: 13))
+                if app.source == "Homebrew" {
+                    Text("Homebrew")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .foregroundStyle(Theme.muted)
+                        .background(Capsule().fill(Color.white.opacity(0.08)))
+                }
+                Spacer()
+                Text(Bytes.str(app.bytes)).font(.system(size: 12)).foregroundStyle(Theme.text.opacity(0.9))
+                Button { withAnimation(.easeOut(duration: 0.15)) { model.toggleExpanded(app) } } label: {
+                    Image(systemName: open ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(Theme.muted)
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
-            if app.source == "Homebrew" {
-                Text("Homebrew")
-                    .font(.system(size: 11, weight: .medium))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .foregroundStyle(Theme.muted)
-                    .background(Capsule().fill(Color.white.opacity(0.08)))
+            .padding(.horizontal, 12)
+            .frame(height: 44)
+            .contentShape(Rectangle())
+            .onTapGesture { model.toggle(app) }
+
+            if open {
+                VStack(alignment: .leading, spacing: 4) {
+                    detail("Caminho", FS.tilde(app.path))
+                    if !app.bundle_id.isEmpty { detail("Identificador", app.bundle_id) }
+                    detail("Origem", app.source)
+                    Button("Mostrar no Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: app.path)]) }
+                        .buttonStyle(LinkButtonStyle())
+                        .font(.system(size: 11.5))
+                        .padding(.top, 2)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 78)
+                .padding(.bottom, 10)
             }
-            Spacer()
-            Text(app.size).foregroundStyle(Theme.muted)
         }
-        .padding(.horizontal, 12)
-        .frame(height: 60)
-        .background(RoundedRectangle(cornerRadius: 8).fill(selected ? Color.white.opacity(0.07) : .clear))
-        .contentShape(Rectangle())
-        .onTapGesture(perform: toggle)
+        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(selected ? Theme.selection : .clear))
+    }
+
+    private func detail(_ label: String, _ value: String) -> some View {
+        HStack(spacing: 8) {
+            Text(label).foregroundStyle(Theme.muted).frame(width: 90, alignment: .leading)
+            Text(value).textSelection(.enabled).lineLimit(1).truncationMode(.middle)
+        }
+        .font(.system(size: 11.5))
     }
 }
 
