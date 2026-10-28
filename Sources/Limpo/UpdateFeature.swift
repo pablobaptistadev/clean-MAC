@@ -72,15 +72,29 @@ enum Updater {
 
     /// Baixa o .dmg, copia o Limpo.app de dentro dele para uma pasta temporária e confere
     /// se é mesmo o Limpo na versão esperada, com a assinatura íntegra.
+    /// Se algo falhar, a pasta temporária (com o .dmg baixado) é apagada.
     static func stage(_ release: LimpoRelease) async throws -> URL {
         guard let asset = release.dmg, let url = URL(string: asset.browser_download_url) else {
             throw UpdateError("a versão \(release.version) não tem .dmg anexado")
         }
         let fm = FileManager.default
+        // Restos de tentativas anteriores (de qualquer versão) saem antes de começar.
+        for old in (try? fm.contentsOfDirectory(at: fm.temporaryDirectory, includingPropertiesForKeys: nil)) ?? []
+        where old.lastPathComponent.hasPrefix("limpo-update-") {
+            try? fm.removeItem(at: old)
+        }
         let dir = fm.temporaryDirectory.appendingPathComponent("limpo-update-\(release.version)")
-        try? fm.removeItem(at: dir)
         try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        do {
+            return try await fetch(asset, from: url, version: release.version, into: dir)
+        } catch {
+            try? fm.removeItem(at: dir)
+            throw error
+        }
+    }
 
+    private static func fetch(_ asset: LimpoRelease.Asset, from url: URL, version: String, into dir: URL) async throws -> URL {
+        let fm = FileManager.default
         let (downloaded, response) = try await URLSession.shared.download(from: url)
         if let http = response as? HTTPURLResponse, http.statusCode != 200 {
             throw UpdateError("o download respondeu \(http.statusCode)")
@@ -104,8 +118,8 @@ enum Updater {
               info["CFBundleIdentifier"] as? String == bundleID else {
             throw UpdateError("o .dmg baixado não contém o Limpo")
         }
-        guard info["CFBundleShortVersionString"] as? String == release.version else {
-            throw UpdateError("o .dmg baixado não é da versão \(release.version)")
+        guard info["CFBundleShortVersionString"] as? String == version else {
+            throw UpdateError("o .dmg baixado não é da versão \(version)")
         }
         try await exec("/usr/bin/codesign", ["--verify", "--deep", "--strict", staged.path])
         return staged
@@ -258,7 +272,12 @@ final class UpdateModel {
         error = nil
         do {
             let staged = try await Updater.stage(release)
-            try Updater.launchSwap(target: target, staged: staged, pid: getpid())
+            do {
+                try Updater.launchSwap(target: target, staged: staged, pid: getpid())
+            } catch {
+                try? FileManager.default.removeItem(at: staged.deletingLastPathComponent())
+                throw error
+            }
             NSApp.terminate(nil)
         } catch {
             phase = .available
