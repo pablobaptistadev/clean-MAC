@@ -195,40 +195,53 @@ struct ExternalCleanView: View {
         switch model.phase {
         case .pick:
             let volumes = ExternalCleanModel.externalVolumes()
-            VStack(spacing: 18) {
-                IconTile(icon: "externaldrive.fill", size: 100).padding(.bottom, 8)
-                Text("Disco externo").font(.system(size: 32, weight: .semibold))
-                Text("Remove metadados que o macOS espalha em pen drives e HDs externos (.DS_Store, arquivos ._, .Trashes, .Spotlight, .fseventsd). Seus arquivos não são tocados.")
-                    .font(.system(size: 14))
-                    .foregroundStyle(Theme.muted)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 520)
-                if volumes.isEmpty {
-                    Text("Nenhum disco externo conectado.").foregroundStyle(Theme.muted).padding(.top, 30)
-                } else {
-                    VStack(spacing: 8) {
-                        ForEach(volumes, id: \.self) { volume in
-                            Button {
-                                Task { await model.preview(volume) }
-                            } label: {
-                                HStack(spacing: 12) {
-                                    FileIcon(path: volume, size: 30)
-                                    Text((volume as NSString).lastPathComponent).font(.system(size: 15, weight: .medium))
-                                    Spacer()
-                                    Image(systemName: "chevron.right").foregroundStyle(Theme.muted)
+            ZStack {
+                Image(systemName: "externaldrive")
+                    .font(.system(size: 300))
+                    .foregroundStyle(Color.white.opacity(0.045))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                    .offset(x: 110)
+                    .allowsHitTesting(false)
+                VStack(spacing: 14) {
+                    Text("Disco externo").font(.system(size: 30))
+                    Text("Remove os metadados que o macOS espalha em pen drives e HDs externos (.DS_Store, arquivos ._, .Trashes, .Spotlight, .fseventsd). Seus arquivos não são tocados.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Theme.muted)
+                        .multilineTextAlignment(.center)
+                        .lineSpacing(3)
+                        .frame(maxWidth: 460)
+                    if volumes.isEmpty {
+                        Text("Nenhum disco externo conectado.")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Theme.muted)
+                            .padding(.top, 30)
+                    } else {
+                        VStack(spacing: 6) {
+                            ForEach(volumes, id: \.self) { volume in
+                                Button {
+                                    Task { await model.preview(volume) }
+                                } label: {
+                                    HStack(spacing: 12) {
+                                        FileIcon(path: volume, size: 26)
+                                        Text((volume as NSString).lastPathComponent).font(.system(size: 13, weight: .medium))
+                                        Spacer()
+                                        Text("Analisar").font(.system(size: 12)).foregroundStyle(Theme.accentLight)
+                                        Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.muted)
+                                    }
+                                    .padding(.horizontal, 14)
+                                    .frame(width: 420, height: 44)
+                                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Theme.panel))
+                                    .contentShape(Rectangle())
                                 }
-                                .padding(.horizontal, 16)
-                                .frame(width: 420, height: 52)
-                                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.panel))
-                                .contentShape(Rectangle())
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
                         }
+                        .padding(.top, 30)
                     }
-                    .padding(.top, 24)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
 
         case .scanning:
             BusyView(title: "Analisando \((model.volume.map { ($0 as NSString).lastPathComponent }) ?? "disco")…", subtitle: "")
@@ -237,36 +250,37 @@ struct ExternalCleanView: View {
             BusyView(title: "Limpando o disco…", subtitle: "Não desconecte o disco.")
 
         case .preview, .done:
+            let name = model.volume.map { ($0 as NSString).lastPathComponent } ?? "Disco externo"
             VStack(spacing: 0) {
-                TopBar(title: model.volume.map { ($0 as NSString).lastPathComponent } ?? "Disco externo") { model.reset() }
+                ResultHeader(
+                    title: model.phase == .done ? "\(name) limpo" : "Pronto para limpar \(name)",
+                    subtitle: "Metadados do macOS que podem sair do disco",
+                    onClose: { model.reset() }
+                )
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 14) {
-                        if let error = model.error { Text(error).foregroundStyle(Theme.danger) }
+                    LazyVStack(alignment: .leading, spacing: 10) {
+                        if let error = model.error { Text(error).font(.system(size: 12)).foregroundStyle(Theme.danger) }
                         if model.sections.isEmpty {
                             Text(model.phase == .done ? "Pronto." : "Nada para limpar neste disco.").foregroundStyle(Theme.muted)
                         }
                         ForEach(model.sections) { OutputSectionCard(section: $0) }
-                        ForEach(model.summary, id: \.self) { Text($0).foregroundStyle(Theme.muted) }
+                        ForEach(model.summary, id: \.self) { Text($0).font(.system(size: 12)).foregroundStyle(Theme.muted) }
                     }
-                    .padding(.horizontal, 28)
-                    .padding(.vertical, 12)
+                    .padding(.horizontal, 22)
+                    .padding(.bottom, 16)
                 }
-                HStack {
-                    Spacer()
-                    if model.phase == .preview {
-                        Button("Limpar disco") { Task { await model.run() } }
-                            .buttonStyle(PillButtonStyle(width: 260))
-                    } else {
-                        Button("Ejetar") {
-                            if let v = model.volume { try? NSWorkspace.shared.unmountAndEjectDevice(at: URL(fileURLWithPath: v)) }
-                            model.reset()
-                        }
-                        .buttonStyle(PillButtonStyle(width: 260))
+                if model.phase == .preview {
+                    ActionBar(button: "Limpar disco", enabled: !model.sections.isEmpty, action: { Task { await model.run() } }) {
+                        Text(name).font(.system(size: 12, weight: .medium))
+                    }
+                } else {
+                    ActionBar(button: "Ejetar", action: {
+                        if let v = model.volume { try? NSWorkspace.shared.unmountAndEjectDevice(at: URL(fileURLWithPath: v)) }
+                        model.reset()
+                    }) {
+                        Text("Pode desconectar o disco depois de ejetar.").foregroundStyle(Theme.muted)
                     }
                 }
-                .padding(.horizontal, 28)
-                .frame(height: 84)
-                .background(Theme.bar)
             }
         }
     }

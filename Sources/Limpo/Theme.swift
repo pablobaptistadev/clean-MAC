@@ -1,22 +1,23 @@
 import SwiftUI
 import AppKit
 
-/// Paleta azul-marinho no estilo do BuhoCleaner: barra lateral escura, área principal azul,
-/// botões principais em azul vivo e links em azul claro.
+/// Cores do sistema da Apple (iOS / macOS em modo escuro) no layout do BuhoCleaner:
+/// fundos cinza-escuro em camadas, azul do sistema para ações e links. Nada em vermelho:
+/// alertas e erros usam o laranja do sistema.
 enum Theme {
-    static let sidebar = Color(red: 0.122, green: 0.133, blue: 0.200)
-    static let main = Color(red: 0.216, green: 0.290, blue: 0.471)
-    static let panel = Color(red: 0.250, green: 0.329, blue: 0.525)
-    static let selection = Color(red: 0.180, green: 0.243, blue: 0.408)
-    static let bar = Color(red: 0.173, green: 0.231, blue: 0.392)
-    static let accent = Color(red: 0.255, green: 0.443, blue: 0.957)
-    static let accentLight = Color(red: 0.490, green: 0.650, blue: 1.000)
-    static let danger = Color(red: 1.0, green: 0.36, blue: 0.36)
+    static let sidebar = Color(red: 0.086, green: 0.086, blue: 0.094)     // #161618
+    static let main = Color(red: 0.110, green: 0.110, blue: 0.118)        // #1C1C1E
+    static let panel = Color(red: 0.173, green: 0.173, blue: 0.180)       // #2C2C2E
+    static let selection = Color(red: 0.227, green: 0.227, blue: 0.235)   // #3A3A3C
+    static let bar = Color(red: 0.141, green: 0.141, blue: 0.149)         // #242426
+    static let accent = Color(red: 0.039, green: 0.518, blue: 1.000)      // systemBlue #0A84FF
+    static let accentLight = Color(red: 0.251, green: 0.612, blue: 1.000) // link #409CFF
+    static let danger = Color(red: 1.000, green: 0.624, blue: 0.039)      // systemOrange #FF9F0A
     static let text = Color.white
-    static let muted = Color(red: 0.690, green: 0.737, blue: 0.851)
+    static let muted = Color(red: 0.596, green: 0.596, blue: 0.624)       // systemGray #98989F
     static let faint = Color.white.opacity(0.06)
-    static let hairline = Color.white.opacity(0.08)
-    static let warning = Color(red: 1.0, green: 0.80, blue: 0.40)
+    static let hairline = Color.white.opacity(0.10)
+    static let warning = Color(red: 1.000, green: 0.839, blue: 0.039)     // systemYellow #FFD60A
 }
 
 // MARK: - Vidro / vibrancy nativo
@@ -75,7 +76,7 @@ struct LinkButtonStyle: ButtonStyle {
 
 // MARK: - Componentes
 
-/// Ícone em "squircle" azul.
+/// Ícone em "squircle" no azul do sistema.
 /// O parâmetro `colors` é mantido por compatibilidade; a cor vem do tema.
 struct IconTile: View {
     let icon: String
@@ -86,7 +87,7 @@ struct IconTile: View {
         RoundedRectangle(cornerRadius: size * 0.2237, style: .continuous)
             .fill(
                 LinearGradient(
-                    colors: [Color(red: 0.35, green: 0.55, blue: 1.0), Color(red: 0.18, green: 0.35, blue: 0.86)],
+                    colors: [Color(red: 0.25, green: 0.62, blue: 1.0), Color(red: 0.0, green: 0.44, blue: 0.95)],
                     startPoint: .top,
                     endPoint: .bottom
                 )
@@ -126,7 +127,7 @@ struct HeroView: View {
         ZStack {
             Image(systemName: icon)
                 .font(.system(size: 300, weight: .regular))
-                .foregroundStyle(Theme.sidebar.opacity(0.35))
+                .foregroundStyle(Color.white.opacity(0.045))
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
                 .offset(x: 110)
                 .allowsHitTesting(false)
@@ -167,7 +168,7 @@ struct ProgressRing: View {
         TimelineView(.animation(paused: fraction != nil)) { context in
             let angle = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.4) / 1.4 * 360
             ZStack {
-                Circle().stroke(Theme.sidebar.opacity(0.6), lineWidth: 9)
+                Circle().stroke(Color.white.opacity(0.08), lineWidth: 9)
                 Circle()
                     .trim(from: 0, to: fraction.map { max(0.02, min($0, 1)) } ?? 0.28)
                     .stroke(Theme.accent, style: StrokeStyle(lineWidth: 9, lineCap: .round))
@@ -304,6 +305,177 @@ struct TriCheckBox: View {
     }
 }
 
+// MARK: - Peças das listas no estilo do BuhoCleaner (coluna de filtros + lista + barra inferior)
+
+/// Linha da coluna de filtros à esquerda (Todos, Selecionados, categorias…).
+struct FilterRow: View {
+    let symbol: String
+    let title: String
+    let value: String
+    let active: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: symbol).font(.system(size: 12)).frame(width: 16)
+                Text(title).font(.system(size: 12.5)).lineLimit(1).truncationMode(.middle)
+                Spacer(minLength: 6)
+                Text(value).font(.system(size: 12)).foregroundStyle(Theme.muted).monospacedDigit()
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 28)
+            .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(active ? Theme.selection : .clear))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// Coluna de filtros: largura fixa, rolável quando há muitos grupos.
+struct FilterColumn<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 2) { content }
+                .padding(.horizontal, 10)
+                .padding(.top, 4)
+        }
+        .frame(width: 250)
+    }
+}
+
+/// Título e descrição acima de uma lista, com controles à direita (ordenar, marcar todos).
+struct ListHeader<Trailing: View>: View {
+    let title: String
+    let subtitle: String
+    @ViewBuilder let trailing: Trailing
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title).font(.system(size: 15, weight: .semibold)).lineLimit(1).truncationMode(.middle)
+            HStack(spacing: 12) {
+                Text(subtitle).font(.system(size: 11.5)).foregroundStyle(Theme.muted).lineLimit(1)
+                Spacer()
+                trailing
+            }
+            .font(.system(size: 11.5))
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 4)
+        .padding(.bottom, 10)
+    }
+}
+
+/// Linha de arquivo com caixa de marcar, ícone, nome, detalhe, tamanho e "mostrar no Finder".
+struct FileCheckRow: View {
+    let path: String
+    let name: String
+    let detail: String
+    let size: Int64
+    let selected: Bool
+    let toggle: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Button(action: toggle) { CheckBox(on: selected) }
+                .buttonStyle(.plain)
+            FileIcon(path: path, size: 26)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(name).font(.system(size: 13)).lineLimit(1).truncationMode(.middle)
+                Text(detail).font(.system(size: 10.5)).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle)
+            }
+            Spacer()
+            Text(Bytes.str(size)).font(.system(size: 12)).monospacedDigit()
+            Button { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) } label: {
+                Image(systemName: "folder")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Theme.muted)
+            .help("Mostrar no Finder")
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 44)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: toggle)
+    }
+}
+
+/// Lista vazia depois de uma análise ("Nada para limpar").
+struct EmptyResult: View {
+    let title: String
+    var subtitle = ""
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "checkmark.circle").font(.system(size: 54, weight: .light)).foregroundStyle(Theme.accentLight)
+            Text(title).font(.system(size: 24))
+            if !subtitle.isEmpty {
+                Text(subtitle).font(.system(size: 13)).foregroundStyle(Theme.muted)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// Cabeçalho das telas de resultado ("Pronto para limpar"): título, resumo e botões à direita.
+struct ResultHeader: View {
+    let title: String
+    let subtitle: String
+    var onRefresh: (() -> Void)? = nil
+    var onClose: (() -> Void)? = nil
+
+    var body: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.system(size: 20, weight: .semibold))
+                Text(subtitle).font(.system(size: 11.5)).foregroundStyle(Theme.muted)
+            }
+            Spacer()
+            HStack(spacing: 14) {
+                if let onRefresh {
+                    Button(action: onRefresh) { Image(systemName: "arrow.clockwise") }
+                        .help("Analisar de novo")
+                }
+                if let onClose {
+                    Button(action: onClose) { Image(systemName: "xmark.circle.fill") }
+                        .help("Começar novamente")
+                }
+            }
+            .buttonStyle(.plain)
+            .font(.system(size: 15))
+            .foregroundStyle(Theme.muted)
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 36)
+        .padding(.bottom, 14)
+    }
+}
+
+/// Barra inferior das telas de resultado: informações à esquerda e a pílula de ação à direita.
+struct ActionBar<Leading: View>: View {
+    let button: String
+    var enabled = true
+    let action: () -> Void
+    @ViewBuilder let leading: Leading
+
+    var body: some View {
+        HStack(spacing: 6) {
+            leading
+            Spacer()
+            Button(button, action: action)
+                .buttonStyle(PillButtonStyle(color: .white, width: 190))
+                .disabled(!enabled)
+                .opacity(enabled ? 1 : 0.45)
+        }
+        .font(.system(size: 12))
+        .padding(.horizontal, 22)
+        .frame(height: 62)
+        .background(Theme.bar)
+    }
+}
+
 struct FileIcon: View {
     let path: String
     var size: CGFloat = 34
@@ -355,22 +527,22 @@ enum Bytes {
     }
 }
 
-// MARK: - Cores dos gráficos (a interface é grafite; só os dados ganham cor)
+// MARK: - Cores dos dados: as cores do sistema da Apple (modo escuro), sem vermelho
 
 enum Palette {
-    static let cpu = Color(red: 0.36, green: 0.84, blue: 0.56)
-    static let gpu = Color(red: 1.00, green: 0.62, blue: 0.32)
-    static let memory = Color(red: 0.98, green: 0.80, blue: 0.38)
-    static let disk = Color(red: 0.42, green: 0.62, blue: 1.00)
-    static let network = Color(red: 0.36, green: 0.74, blue: 1.00)
-    static let upload = Color(red: 0.42, green: 0.88, blue: 0.62)
-    static let warm = Color(red: 1.00, green: 0.55, blue: 0.30)
-    static let hot = Color(red: 1.00, green: 0.33, blue: 0.33)
-    static let violet = Color(red: 0.70, green: 0.56, blue: 1.00)
+    static let cpu = Color(red: 0.188, green: 0.820, blue: 0.345)     // systemGreen #30D158
+    static let gpu = Color(red: 1.000, green: 0.624, blue: 0.039)     // systemOrange #FF9F0A
+    static let memory = Color(red: 1.000, green: 0.839, blue: 0.039)  // systemYellow #FFD60A
+    static let disk = Color(red: 0.039, green: 0.518, blue: 1.000)    // systemBlue #0A84FF
+    static let network = Color(red: 0.392, green: 0.824, blue: 1.000) // systemCyan #64D2FF
+    static let upload = Color(red: 0.400, green: 0.831, blue: 0.812)  // systemMint #66D4CF
+    static let warm = Color(red: 1.000, green: 0.624, blue: 0.039)    // systemOrange
+    static let hot = Color(red: 1.000, green: 0.624, blue: 0.039)     // systemOrange (o vermelho foi aposentado)
+    static let violet = Color(red: 0.749, green: 0.353, blue: 0.949)  // systemPurple #BF5AF2
 
-    /// Verde → âmbar → vermelho conforme a fração (0…1).
+    /// Verde → amarelo → laranja conforme a fração (0…1).
     static func level(_ fraction: Double) -> Color {
-        fraction >= 0.85 ? hot : fraction >= 0.65 ? warm : cpu
+        fraction >= 0.85 ? hot : fraction >= 0.65 ? memory : cpu
     }
 
     static func health(_ score: Int) -> Color {

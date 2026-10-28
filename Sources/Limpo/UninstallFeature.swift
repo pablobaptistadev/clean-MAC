@@ -296,20 +296,9 @@ struct UninstallView: View {
     }
 
     private func filterRow(_ model: UninstallModel, _ filter: UninstallModel.Filter, _ symbol: String, _ title: String) -> some View {
-        let active = model.filter == filter
-        return Button { model.filter = filter } label: {
-            HStack(spacing: 8) {
-                Image(systemName: symbol).font(.system(size: 12)).frame(width: 16)
-                Text(title).font(.system(size: 12.5))
-                Spacer()
-                Text("\(model.apps(in: filter).count)").font(.system(size: 12)).foregroundStyle(Theme.muted)
-            }
-            .padding(.horizontal, 10)
-            .frame(height: 28)
-            .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(active ? Theme.selection : .clear))
-            .contentShape(Rectangle())
+        FilterRow(symbol: symbol, title: title, value: "\(model.apps(in: filter).count)", active: model.filter == filter) {
+            model.filter = filter
         }
-        .buttonStyle(.plain)
     }
 
     private func optionRow(_ title: String, on: Bool, help: String, toggle: @escaping () -> Void) -> some View {
@@ -329,26 +318,15 @@ struct UninstallView: View {
 
     private func listHeader(_ model: UninstallModel) -> some View {
         let titles: [UninstallModel.Filter: String] = [.all: "Todos os apps", .selected: "Selecionados", .large: "Apps grandes", .homebrew: "Instalados pelo Homebrew"]
-        return VStack(alignment: .leading, spacing: 3) {
-            Text(titles[model.filter] ?? "").font(.system(size: 15, weight: .semibold))
-            HStack {
-                Text("Apps instalados no seu Mac. Você revisa tudo antes de remover.")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(Theme.muted)
-                Spacer()
-                Menu(model.sort == .size ? "Ordenar por tamanho" : "Ordenar por nome") {
-                    Button("Tamanho") { model.sort = .size }
-                    Button("Nome") { model.sort = .name }
-                }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-                .font(.system(size: 11.5))
-                .foregroundStyle(Theme.muted)
+        return ListHeader(title: titles[model.filter] ?? "", subtitle: "Apps instalados no seu Mac. Você revisa tudo antes de remover.") {
+            Menu(model.sort == .size ? "Ordenar por tamanho" : "Ordenar por nome") {
+                Button("Tamanho") { model.sort = .size }
+                Button("Nome") { model.sort = .name }
             }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .foregroundStyle(Theme.muted)
         }
-        .padding(.horizontal, 24)
-        .padding(.top, 4)
-        .padding(.bottom, 10)
     }
 }
 
@@ -404,7 +382,7 @@ private struct AppRow: View {
                 .padding(.bottom, 10)
             }
         }
-        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(selected ? Theme.selection : .clear))
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(open ? Theme.panel : .clear))
     }
 
     private func detail(_ label: String, _ value: String) -> some View {
@@ -464,7 +442,7 @@ private struct UninstallSheet: View {
                     Button("Cancelar") { model.close() }
                         .keyboardShortcut(.cancelAction)
                     Button("Desinstalar") { model.confirm() }
-                        .tint(Theme.danger)
+                        .tint(Theme.accent)
                         .buttonStyle(.borderedProminent)
                         .disabled(model.planLoading)
                 }

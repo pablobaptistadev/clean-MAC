@@ -474,14 +474,14 @@ private struct CleanResultsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
+            ResultHeader(
+                title: "Pronto para limpar",
+                subtitle: "\(Bytes.str(model.total)) disponíveis para limpeza · \(model.itemCount) itens · \(model.categories.count) categorias",
+                onRefresh: { Task { await model.scan() } },
+                onClose: { model.reset() }
+            )
             if model.categories.isEmpty && !model.trashBlocked {
-                VStack(spacing: 12) {
-                    Image(systemName: "checkmark.circle").font(.system(size: 54, weight: .light)).foregroundStyle(Theme.accentLight)
-                    Text("Nada para limpar").font(.system(size: 24))
-                    Text("Seu Mac já está em dia.").font(.system(size: 13)).foregroundStyle(Theme.muted)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                EmptyResult(title: "Nada para limpar", subtitle: "Seu Mac já está em dia.")
             } else {
                 ScrollView {
                     LazyVStack(spacing: 10) {
@@ -501,30 +501,6 @@ private struct CleanResultsView: View {
             }
             footer
         }
-    }
-
-    private var header: some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Pronto para limpar").font(.system(size: 20, weight: .semibold))
-                Text("\(Bytes.str(model.total)) disponíveis para limpeza · \(model.itemCount) itens · \(model.categories.count) categorias")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(Theme.muted)
-            }
-            Spacer()
-            HStack(spacing: 14) {
-                Button { Task { await model.scan() } } label: { Image(systemName: "arrow.clockwise") }
-                    .help("Analisar de novo")
-                Button { model.reset() } label: { Image(systemName: "xmark.circle.fill") }
-                    .help("Começar novamente")
-            }
-            .buttonStyle(.plain)
-            .font(.system(size: 15))
-            .foregroundStyle(Theme.muted)
-        }
-        .padding(.horizontal, 24)
-        .padding(.top, 36)
-        .padding(.bottom, 14)
     }
 
     private var trashBlockedCard: some View {
@@ -547,25 +523,16 @@ private struct CleanResultsView: View {
     }
 
     private var footer: some View {
-        HStack(spacing: 6) {
+        ActionBar(button: "Limpar · \(Bytes.str(model.selectedTotal))", enabled: model.selectedTotal > 0, action: {
+            Task { await model.clean() }
+        }) {
             Text("\(model.selectedItems) selecionados").font(.system(size: 12, weight: .medium))
             Button("Todos") { model.selectAll() }.buttonStyle(LinkButtonStyle())
             Text("·").foregroundStyle(Theme.muted)
             Button("Nenhum") { model.selectNone() }.buttonStyle(LinkButtonStyle())
             Text("·").foregroundStyle(Theme.muted)
             Button("Recomendados") { model.selectRecommended() }.buttonStyle(LinkButtonStyle())
-            Spacer()
-            Button("Limpar · \(Bytes.str(model.selectedTotal))") {
-                Task { await model.clean() }
-            }
-            .buttonStyle(PillButtonStyle(color: .white, width: 190))
-            .disabled(model.selectedTotal == 0)
-            .opacity(model.selectedTotal == 0 ? 0.45 : 1)
         }
-        .font(.system(size: 12))
-        .padding(.horizontal, 22)
-        .frame(height: 62)
-        .background(Theme.bar)
     }
 }
 

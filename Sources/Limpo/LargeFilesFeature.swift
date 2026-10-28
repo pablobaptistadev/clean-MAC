@@ -8,7 +8,7 @@ enum FileCategory: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .all: return "Todos os Arquivos"
+        case .all: return "Todos os arquivos"
         case .audio: return "Áudio"
         case .video: return "Vídeo"
         case .image: return "Imagem"
@@ -20,25 +20,13 @@ enum FileCategory: String, CaseIterable, Identifiable {
 
     var icon: String {
         switch self {
-        case .all: return "doc.text.fill"
+        case .all: return "doc.on.doc"
         case .audio: return "music.note"
-        case .video: return "play.rectangle.fill"
-        case .image: return "photo.fill"
-        case .documents: return "folder.fill"
-        case .packages: return "shippingbox.fill"
-        case .other: return "square.stack.3d.up.fill"
-        }
-    }
-
-    var colors: [Color] {
-        switch self {
-        case .all: return [Color(red: 0.36, green: 0.62, blue: 1), Color(red: 0.2, green: 0.42, blue: 0.95)]
-        case .audio: return [Color(red: 1, green: 0.45, blue: 0.55), Color(red: 0.9, green: 0.25, blue: 0.4)]
-        case .video: return [Color(red: 0.7, green: 0.5, blue: 1), Color(red: 0.5, green: 0.3, blue: 0.95)]
-        case .image: return [Color(red: 1, green: 0.6, blue: 0.4), Color(red: 0.95, green: 0.4, blue: 0.3)]
-        case .documents: return [Color(red: 0.4, green: 0.85, blue: 0.55), Color(red: 0.2, green: 0.7, blue: 0.4)]
-        case .packages: return [Color(red: 0.4, green: 0.55, blue: 1), Color(red: 0.25, green: 0.35, blue: 0.85)]
-        case .other: return [Color(red: 0.35, green: 0.85, blue: 0.75), Color(red: 0.15, green: 0.65, blue: 0.6)]
+        case .video: return "play.rectangle"
+        case .image: return "photo"
+        case .documents: return "doc.text"
+        case .packages: return "shippingbox"
+        case .other: return "square.stack.3d.up"
         }
     }
 
@@ -174,9 +162,8 @@ struct LargeFilesView: View {
         switch model.phase {
         case .idle:
             HeroView(
-                icon: "folder.fill",
-                colors: [Color(red: 0.36, green: 0.62, blue: 1), Color(red: 0.2, green: 0.42, blue: 0.95)],
-                title: "Arquivos Grandes",
+                icon: "folder",
+                title: "Arquivos grandes",
                 subtitle: "Encontra os maiores arquivos da sua pasta de usuário. Os itens removidos vão para o Lixo, então dá para desfazer.",
                 button: "Analisar",
                 error: model.error
@@ -189,13 +176,20 @@ struct LargeFilesView: View {
 
         case .results:
             VStack(spacing: 0) {
-                TopBar(title: "Arquivos Grandes") { model.reset() }
-                HStack(alignment: .top, spacing: 26) {
-                    categoryList(model)
+                TopBar(title: "Arquivos grandes") { model.reset() }
+                HStack(alignment: .top, spacing: 0) {
+                    FilterColumn {
+                        ForEach(FileCategory.allCases) { category in
+                            let bytes = model.bytes(in: category)
+                            FilterRow(symbol: category.icon, title: category.title, value: bytes == 0 ? "—" : Bytes.str(bytes),
+                                      active: model.category == category) {
+                                model.category = category
+                            }
+                            .opacity(bytes == 0 && category != .all ? 0.5 : 1)
+                        }
+                    }
                     fileList(model)
                 }
-                .padding(.horizontal, 24)
-                .padding(.vertical, 12)
                 BottomBar(
                     selected: model.selectedBytes,
                     total: model.totalBytes,
@@ -215,140 +209,60 @@ struct LargeFilesView: View {
         }
     }
 
-    private func categoryList(_ model: LargeFilesModel) -> some View {
-        VStack(spacing: 4) {
-            ForEach(FileCategory.allCases) { category in
-                let bytes = model.bytes(in: category)
-                Button {
-                    model.category = category
-                } label: {
-                    HStack(spacing: 14) {
-                        IconTile(icon: category.icon, colors: category.colors, size: 38)
-                        Text(category.title).font(.system(size: 15))
-                        Spacer()
-                        Text(bytes == 0 ? "0 bytes" : Bytes.str(bytes))
-                            .font(.system(size: 14))
-                            .foregroundStyle(Theme.muted)
-                    }
-                    .padding(.horizontal, 14)
-                    .frame(height: 62)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(model.category == category ? Color.white.opacity(0.09) : .clear)
-                    )
-                    .opacity(bytes == 0 && category != .all ? 0.55 : 1)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-            Spacer()
-        }
-        .frame(width: 380)
-    }
-
     private func fileList(_ model: LargeFilesModel) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(model.category.title)
-                .font(.system(size: 24, weight: .semibold))
-            Text("Maiores arquivos encontrados na sua pasta de usuário.")
-                .foregroundStyle(Theme.muted)
-
-            HStack {
-                Button(model.visible.allSatisfy { model.selected.contains($0.id) } && !model.visible.isEmpty
-                       ? "Desmarcar todos" : "Selecionar todos") {
-                    model.toggleAllVisible()
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(Theme.accentLight)
-                Spacer()
-                Menu {
+        let allOn = !model.visible.isEmpty && model.visible.allSatisfy { model.selected.contains($0.id) }
+        return VStack(alignment: .leading, spacing: 0) {
+            ListHeader(title: model.category.title, subtitle: "Os maiores arquivos da sua pasta de usuário.") {
+                Button(allOn ? "Desmarcar todos" : "Marcar todos") { model.toggleAllVisible() }
+                    .buttonStyle(LinkButtonStyle())
+                Menu(model.sort == .size ? "Ordenar por tamanho" : "Ordenar por data") {
                     Button("Tamanho") { model.sort = .size }
                     Button("Data de modificação") { model.sort = .date }
-                } label: {
-                    Text(model.sort == .size ? "Ordenar por Tamanho" : "Ordenar por Data")
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
+                .foregroundStyle(Theme.muted)
             }
-            .padding(.top, 14)
-
             if !model.failed.isEmpty {
                 Text("Não foi possível mover: \(model.failed.joined(separator: ", "))")
-                    .font(.caption)
+                    .font(.system(size: 11.5))
                     .foregroundStyle(Theme.danger)
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 6)
             }
-
             if model.visible.isEmpty {
                 Text("Nenhum arquivo nesta categoria.")
+                    .font(.system(size: 13))
                     .foregroundStyle(Theme.muted)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 2) {
+                    LazyVStack(spacing: 0) {
                         ForEach(model.visible) { file in
-                            FileRow(file: file, selected: model.selected.contains(file.id)) {
+                            FileCheckRow(path: file.path, name: file.name, detail: Self.detail(file), size: file.size,
+                                         selected: model.selected.contains(file.id)) {
                                 model.toggle(file)
                             }
                         }
                     }
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 12)
                 }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
-}
-
-private struct FileRow: View {
-    let file: LargeFile
-    let selected: Bool
-    let toggle: () -> Void
 
     private static let dateFormatter: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "pt_BR")
-        f.dateFormat = "d 'de' MMM. 'de' yyyy"
+        f.dateFormat = "d 'de' MMM 'de' yyyy"
         return f
     }()
 
-    var body: some View {
-        HStack(spacing: 14) {
-            CheckBox(on: selected)
-            FileIcon(path: file.path, size: 34)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(file.name)
-                    .font(.system(size: 15))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Text(subtitle)
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.muted)
-                    .lineLimit(1)
-                    .truncationMode(.head)
-            }
-            Spacer()
-            Text(Bytes.str(file.size))
-                .font(.system(size: 14))
-                .foregroundStyle(Theme.muted)
-            Button {
-                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: file.path)])
-            } label: {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(Theme.muted)
-            }
-            .buttonStyle(.plain)
-            .help("Mostrar no Finder")
-        }
-        .padding(.horizontal, 12)
-        .frame(height: 60)
-        .background(RoundedRectangle(cornerRadius: 8).fill(selected ? Color.white.opacity(0.07) : .clear))
-        .contentShape(Rectangle())
-        .onTapGesture(perform: toggle)
-    }
-
-    private var subtitle: String {
-        let folder = (file.path as NSString).deletingLastPathComponent
-            .replacingOccurrences(of: MoleCLI.home, with: "~")
+    private static func detail(_ file: LargeFile) -> String {
+        let folder = FS.tilde((file.path as NSString).deletingLastPathComponent)
         guard let date = file.modified else { return folder }
-        return "\(Self.dateFormatter.string(from: date)) · \(folder)"
+        return "\(dateFormatter.string(from: date)) · \(folder)"
     }
 }

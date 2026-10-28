@@ -521,12 +521,8 @@ struct MetricCard<Content: View>: View {
         .padding(compact ? 12 : 18)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(
-            RoundedRectangle(cornerRadius: compact ? 12 : 14, style: .continuous)
-                .fill(Color.white.opacity(0.045))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: compact ? 12 : 14, style: .continuous)
-                .strokeBorder(Theme.hairline, lineWidth: 1)
+            RoundedRectangle(cornerRadius: compact ? 10 : 12, style: .continuous)
+                .fill(compact ? Color.white.opacity(0.045) : Theme.panel)
         )
     }
 }
@@ -551,28 +547,34 @@ struct StatusView: View {
 
         Group {
             if let s = model.snapshot {
-                ScrollView {
-                    VStack(spacing: 14) {
-                        ForEach(s.activeAlerts) { alert in
-                            AlertBanner(alert: alert)
+                VStack(spacing: 0) {
+                    ResultHeader(
+                        title: "Status",
+                        subtitle: "Ao vivo · \([s.hardware?.cpu_model, s.hardware?.os_version, s.uptime.map { "ligado há \($0)" }].compactMap { $0 }.joined(separator: " · "))"
+                    )
+                    ScrollView {
+                        VStack(spacing: 14) {
+                            ForEach(s.activeAlerts) { alert in
+                                AlertBanner(alert: alert)
+                            }
+                            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: 4), spacing: 14) {
+                                // O Lixo vem primeiro sempre que tem itens.
+                                if (s.trash_size ?? 0) > 0 { trashCard(s) }
+                                healthCard(s)
+                                cpuCard(s, model)
+                                gpuCard(s, model)
+                                memoryCard(s, model)
+                                tempCard(s)
+                                diskCard(s)
+                                networkCard(s, model)
+                                fanCard(s)
+                                if let battery = s.batteries?.first { batteryCard(battery, s) }
+                            }
+                            ProcessListView()
                         }
-                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: 4), spacing: 14) {
-                            healthCard(s)
-                            cpuCard(s, model)
-                            gpuCard(s, model)
-                            memoryCard(s, model)
-                            tempCard(s)
-                            diskCard(s)
-                            networkCard(s, model)
-                            fanCard(s)
-                            if let battery = s.batteries?.first { batteryCard(battery, s) }
-                            if (s.trash_size ?? 0) > 0 { trashCard(s) }
-                        }
-                        ProcessListView()
+                        .padding(.horizontal, 22)
+                        .padding(.bottom, 18)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 10)
-                    .padding(.bottom, 18)
                 }
             } else if let error = model.error {
                 VStack(spacing: 12) {

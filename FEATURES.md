@@ -11,7 +11,7 @@ Levantado do código do repositório tw93/Mole (dispatcher `mole`, `bin/*.sh`, `
 | `mo purge` / `--paths` / `--include-empty` / `--yes` | Limpar › Projetos + Ajustes › Pastas de projetos | varredura nativa com as mesmas pastas e alvos; vai para o Lixo |
 | `mo installer` | Limpar › Instaladores | varredura nativa nos mesmos locais; vai para o Lixo |
 | `mo optimize` / `--dry-run` | Otimizar | plano + execução com saída ao vivo |
-| `mo optimize --whitelist` | Ajustes › Tarefas da otimização | liga/desliga as 19 tarefas (`whitelist_optimize`) |
+| `mo optimize --whitelist` | Otimizar (caixa em cada tarefa) + Ajustes › Tarefas da otimização | liga/desliga as 19 tarefas (`whitelist_optimize`) |
 | `mo analyze` (visão geral + "espaço oculto") | Analisar › Explorador | começa na visão geral; navega por pasta; menu Discos |
 | `mo analyze --json PATH` | Analisar › Explorador | drill-down, mover para o Lixo, mostrar no Finder |
 | Arquivos grandes do `analyze` | Analisar › Arquivos grandes | por categoria |

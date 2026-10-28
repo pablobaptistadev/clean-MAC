@@ -428,8 +428,7 @@ struct ProcessListView: View {
                 }
             }
         }
-        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.white.opacity(0.045)))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.hairline, lineWidth: 1))
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.panel))
         .onAppear { model.attach() }
         .onDisappear { model.detach() }
         .sheet(item: Binding(get: { model.info }, set: { model.info = $0 })) { details in

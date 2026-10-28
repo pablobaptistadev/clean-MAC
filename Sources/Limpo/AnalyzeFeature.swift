@@ -83,6 +83,13 @@ final class ExplorerModel {
         await load(current)
     }
 
+    func reset() {
+        stack = []
+        entries = []
+        total = 0
+        error = nil
+    }
+
     private func load(_ path: String) async {
         if let cached = cache[path] {
             entries = cached.entries
@@ -146,29 +153,43 @@ struct ExplorerView: View {
     var body: some View {
         let model = store.explorer
 
-        VStack(spacing: 0) {
-            toolbar(model)
-            if let error = model.error {
-                Text(error).font(.callout).foregroundStyle(Theme.danger).padding(.horizontal, 28).padding(.bottom, 6)
-            }
-            if model.loading && model.entries.isEmpty {
-                BusyView(title: "Medindo pastas…", subtitle: "A primeira análise de uma pasta grande demora; as próximas usam cache.")
+        Group {
+            if model.stack.isEmpty {
+                HeroView(
+                    icon: "chart.pie",
+                    title: "Espaço em disco",
+                    subtitle: "Mostra o que ocupa espaço no seu Mac, pasta por pasta, e aponta o que pode ser limpo e o espaço que o macOS esconde.",
+                    button: "Analisar",
+                    error: model.error
+                ) {
+                    Task { await model.start() }
+                }
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 4) {
-                        ForEach(Array(model.entries.enumerated()), id: \.element.id) { index, entry in
-                            row(entry, index: index, model: model)
+                VStack(spacing: 0) {
+                    TopBar(title: "Espaço em disco") { model.reset() }
+                    header(model)
+                    if let error = model.error {
+                        Text(error).font(.system(size: 11.5)).foregroundStyle(Theme.danger).padding(.horizontal, 24).padding(.bottom, 6)
+                    }
+                    if model.loading && model.entries.isEmpty {
+                        BusyView(title: "Medindo pastas…", subtitle: "A primeira análise de uma pasta grande demora; as próximas usam cache.")
+                    } else {
+                        ScrollView {
+                            LazyVStack(spacing: 0) {
+                                ForEach(Array(model.entries.enumerated()), id: \.element.id) { index, entry in
+                                    row(entry, index: index, model: model)
+                                }
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.bottom, 12)
+                        }
+                        .overlay(alignment: .top) {
+                            if model.loading { ProgressView().controlSize(.small).padding(8) }
                         }
                     }
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 8)
-                }
-                .overlay(alignment: .top) {
-                    if model.loading { ProgressView().controlSize(.small).padding(8) }
                 }
             }
         }
-        .task { await model.start() }
         .alert(
             "Mover \(model.pendingTrash?.name ?? "") para o Lixo?",
             isPresented: Binding(get: { model.pendingTrash != nil }, set: { if !$0 { model.pendingTrash = nil } })
@@ -183,58 +204,72 @@ struct ExplorerView: View {
         }
     }
 
-    private func toolbar(_ model: ExplorerModel) -> some View {
-        HStack(spacing: 10) {
-            Button { Task { await model.back() } } label: {
-                Image(systemName: "chevron.left").frame(width: 28, height: 28)
-            }
-            .buttonStyle(.plain)
-            .disabled(model.stack.count < 2)
-            .opacity(model.stack.count < 2 ? 0.35 : 1)
+    private func title(_ path: String, index: Int, model: ExplorerModel) -> String {
+        if path.isEmpty { return "Visão geral" }
+        return (index == 0 || model.stack.first == "" && index == 1) ? FS.tilde(path) : (path as NSString).lastPathComponent
+    }
 
+    /// Nome da pasta atual, caminho clicável e controles (voltar, medir de novo, discos, escolher pasta).
+    private func header(_ model: ExplorerModel) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 10) {
+                Button { Task { await model.back() } } label: { Image(systemName: "chevron.left") }
+                    .buttonStyle(.plain)
+                    .disabled(model.stack.count < 2)
+                    .opacity(model.stack.count < 2 ? 0.35 : 1)
+                    .help("Pasta anterior")
+                Text(title(model.current ?? "", index: model.stack.count - 1, model: model))
+                    .font(.system(size: 15, weight: .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(Bytes.str(model.total)).font(.system(size: 12)).foregroundStyle(Theme.muted)
+                Spacer()
+                Button { Task { await model.reload() } } label: { Image(systemName: "arrow.clockwise") }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Theme.muted)
+                    .help("Medir de novo")
+                Menu("Discos") {
+                    ForEach(ExplorerModel.volumes(), id: \.self) { volume in
+                        Button(volume) { Task { await model.openRoot("/Volumes/" + volume) } }
+                    }
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .foregroundStyle(Theme.muted)
+                Button("Escolher pasta…") { Task { await model.choose() } }
+                    .buttonStyle(LinkButtonStyle())
+            }
+            if model.stack.count > 1 {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 4) {
                     ForEach(Array(model.stack.enumerated()), id: \.offset) { index, path in
-                        if index > 0 { Image(systemName: "chevron.right").font(.system(size: 9)).foregroundStyle(Theme.muted) }
+                        if index > 0 { Image(systemName: "chevron.right").font(.system(size: 8)).foregroundStyle(Theme.muted) }
                         Button { Task { await model.jump(to: index) } } label: {
-                            Text(path.isEmpty ? "Visão geral" : (index == 0 || model.stack.first == "" && index == 1) ? FS.tilde(path) : (path as NSString).lastPathComponent)
-                                .font(.system(size: 13, weight: index == model.stack.count - 1 ? .semibold : .regular))
+                            Text(title(path, index: index, model: model))
                                 .foregroundStyle(index == model.stack.count - 1 ? Theme.text : Theme.muted)
                         }
                         .buttonStyle(.plain)
                     }
                 }
             }
-
-            Spacer()
-            Text(Bytes.str(model.total)).font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.muted)
-            Button { Task { await model.reload() } } label: { Image(systemName: "arrow.clockwise") }
-                .buttonStyle(.plain).help("Medir de novo")
-            Menu("Discos") {
-                ForEach(ExplorerModel.volumes(), id: \.self) { volume in
-                    Button(volume) { Task { await model.openRoot("/Volumes/" + volume) } }
-                }
+            .font(.system(size: 11.5))
             }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
-            Button("Escolher pasta…") { Task { await model.choose() } }
-                .buttonStyle(.plain)
-                .foregroundStyle(Theme.accentLight)
         }
-        .font(.system(size: 13))
-        .padding(.horizontal, 28)
-        .padding(.vertical, 10)
+        .font(.system(size: 12))
+        .padding(.horizontal, 24)
+        .padding(.top, 4)
+        .padding(.bottom, 10)
     }
 
     private func row(_ entry: DiskEntry, index: Int, model: ExplorerModel) -> some View {
         let fraction = Double(entry.size) / Double(max(model.entries.first?.size ?? 1, 1))
         let share = Double(entry.size) / Double(max(model.total, 1))
         let color = barColor(index: index, entry: entry)
-        return HStack(spacing: 14) {
-            FileIcon(path: entry.path, size: 28)
+        return HStack(spacing: 12) {
+            FileIcon(path: entry.path, size: 26)
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 8) {
-                    Text(entry.name).font(.system(size: 14)).lineLimit(1).truncationMode(.middle)
+                    Text(entry.name).font(.system(size: 13)).lineLimit(1).truncationMode(.middle)
                     if entry.insight == true {
                         Chip(text: "Espaço oculto", strong: true)
                     } else if entry.cleanable == true {
@@ -245,21 +280,21 @@ struct ExplorerView: View {
                     ZStack(alignment: .leading) {
                         Capsule().fill(Color.white.opacity(0.06))
                         Capsule()
-                            .fill(LinearGradient(colors: [color.opacity(0.7), color], startPoint: .leading, endPoint: .trailing))
+                            .fill(color)
                             .frame(width: max(4, geo.size.width * fraction))
                     }
                 }
-                .frame(height: 6)
+                .frame(height: 4)
             }
             Text(String(format: "%.1f%%", share * 100))
-                .font(.system(size: 12))
+                .font(.system(size: 11.5))
                 .monospacedDigit()
                 .foregroundStyle(Theme.muted)
                 .frame(width: 54, alignment: .trailing)
             Text(Bytes.str(entry.size))
-                .font(.system(size: 13.5, weight: .medium))
+                .font(.system(size: 12.5, weight: .medium))
                 .monospacedDigit()
-                .frame(width: 90, alignment: .trailing)
+                .frame(width: 84, alignment: .trailing)
             Menu {
                 if entry.is_dir {
                     Button { Task { await model.open(entry.path) } } label: { Label("Abrir", systemImage: "folder") }
@@ -279,9 +314,8 @@ struct ExplorerView: View {
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(entry.is_dir ? Theme.muted : .clear)
         }
-        .padding(.horizontal, 14)
-        .frame(height: 56)
-        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Theme.panel.opacity(0.7)))
+        .padding(.horizontal, 12)
+        .frame(height: 50)
         .contentShape(Rectangle())
         .onTapGesture {
             if entry.is_dir { Task { await model.open(entry.path) } }

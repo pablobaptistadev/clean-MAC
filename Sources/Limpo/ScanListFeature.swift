@@ -27,6 +27,8 @@ final class ScanListModel {
     var failed: [String] = []
     var confirm = false
     var progress = ""
+    /// Grupo escolhido na coluna da esquerda (nil = todos).
+    var group: String?
 
     init(scanner: @escaping @Sendable () async -> [TrashItem]) {
         self.scanner = scanner
@@ -38,6 +40,15 @@ final class ScanListModel {
             .sorted { $0.items.reduce(0) { $0 + $1.size } > $1.items.reduce(0) { $0 + $1.size } }
     }
 
+    var visibleItems: [TrashItem] {
+        (group.map { g in items.filter { $0.group == g } } ?? items).sorted { $0.size > $1.size }
+    }
+
+    func toggleVisible() {
+        let ids = Set(visibleItems.map(\.id))
+        if ids.isSubset(of: selected) { selected.subtract(ids) } else { selected.formUnion(ids) }
+    }
+
     var total: Int64 { items.reduce(0) { $0 + $1.size } }
     var selectedBytes: Int64 { items.filter { selected.contains($0.id) }.reduce(0) { $0 + $1.size } }
 
@@ -47,16 +58,12 @@ final class ScanListModel {
         items = found
         selected = Set(found.filter(\.preselected).map(\.id))
         failed = []
+        group = nil
         phase = .results
     }
 
     func toggle(_ item: TrashItem) {
         if selected.contains(item.id) { selected.remove(item.id) } else { selected.insert(item.id) }
-    }
-
-    func toggleGroup(_ list: [TrashItem]) {
-        let ids = Set(list.map(\.id))
-        if ids.isSubset(of: selected) { selected.subtract(ids) } else { selected.formUnion(ids) }
     }
 
     func trashSelected() {
@@ -88,6 +95,9 @@ struct ScanListView: View {
     let subtitle: String
     let busy: String
     let empty: String
+    /// Ícone de cada grupo na coluna da esquerda (pasta do projeto, local do instalador).
+    var groupIcon = "folder"
+    var listSubtitle = ""
 
     var body: some View {
         switch model.phase {
@@ -101,25 +111,21 @@ struct ScanListView: View {
             VStack(spacing: 0) {
                 TopBar(title: title) { model.reset() }
                 if model.items.isEmpty {
-                    VStack(spacing: 14) {
-                        IconTile(icon: "checkmark", size: 80)
-                        Text(empty).font(.system(size: 22, weight: .semibold))
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    EmptyResult(title: empty)
                 } else {
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 14) {
-                            if !model.failed.isEmpty {
-                                Text("Não foi possível mover: \(model.failed.joined(separator: ", "))")
-                                    .font(.caption)
-                                    .foregroundStyle(Theme.danger)
+                    HStack(alignment: .top, spacing: 0) {
+                        FilterColumn {
+                            FilterRow(symbol: "square.grid.2x2", title: "Todos", value: Bytes.str(model.total), active: model.group == nil) {
+                                model.group = nil
                             }
                             ForEach(model.groups, id: \.name) { group in
-                                groupCard(group.name, group.items)
+                                FilterRow(symbol: groupIcon, title: group.name, value: Bytes.str(group.items.reduce(0) { $0 + $1.size }),
+                                          active: model.group == group.name) {
+                                    model.group = group.name
+                                }
                             }
                         }
-                        .padding(.horizontal, 28)
-                        .padding(.vertical, 12)
+                        list
                     }
                 }
                 BottomBar(
@@ -141,45 +147,36 @@ struct ScanListView: View {
         }
     }
 
-    private func groupCard(_ name: String, _ list: [TrashItem]) -> some View {
-        let allOn = Set(list.map(\.id)).isSubset(of: model.selected)
+    private var list: some View {
+        let visible = model.visibleItems
+        let allOn = !visible.isEmpty && Set(visible.map(\.id)).isSubset(of: model.selected)
         return VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 12) {
-                Button { model.toggleGroup(list) } label: { CheckBox(on: allOn) }
-                    .buttonStyle(.plain)
-                Text(name).font(.system(size: 14, weight: .semibold)).lineLimit(1).truncationMode(.middle)
-                Spacer()
-                Text(Bytes.str(list.reduce(0) { $0 + $1.size })).foregroundStyle(Theme.muted)
+            ListHeader(title: model.group ?? "Todos", subtitle: listSubtitle) {
+                Button(allOn ? "Desmarcar todos" : "Marcar todos") { model.toggleVisible() }
+                    .buttonStyle(LinkButtonStyle())
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            ForEach(list) { item in
-                Divider().overlay(Theme.faint)
-                HStack(spacing: 12) {
-                    CheckBox(on: model.selected.contains(item.id))
-                    FileIcon(path: item.path, size: 26)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(item.name).font(.system(size: 13.5)).lineLimit(1)
-                        Text(item.detail).font(.system(size: 11.5)).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.head)
+            if !model.failed.isEmpty {
+                Text("Não foi possível mover: \(model.failed.joined(separator: ", "))")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Theme.danger)
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 6)
+            }
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(visible) { item in
+                        FileCheckRow(path: item.path, name: item.name,
+                                     detail: model.group == nil ? "\(item.group) · \(item.detail)" : item.detail,
+                                     size: item.size, selected: model.selected.contains(item.id)) {
+                            model.toggle(item)
+                        }
                     }
-                    Spacer()
-                    Text(Bytes.str(item.size)).font(.system(size: 13)).foregroundStyle(Theme.muted)
-                    Button {
-                        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: item.path)])
-                    } label: {
-                        Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Mostrar no Finder")
                 }
-                .padding(.horizontal, 16)
-                .frame(height: 50)
-                .contentShape(Rectangle())
-                .onTapGesture { model.toggle(item) }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 12)
             }
         }
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.panel))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.hairline, lineWidth: 1))
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
 
@@ -412,20 +409,24 @@ struct CleanTabView: View {
             case .projects:
                 ScanListView(
                     model: store.purge,
-                    icon: "hammer.fill",
+                    icon: "hammer",
                     title: "Projetos",
                     subtitle: "Encontra artefatos de build que podem ser recriados (node_modules, vendor, target, .next, DerivedData…) nas suas pastas de projetos. Os usados nos últimos 7 dias ficam desmarcados.",
                     busy: "Procurando artefatos de build…",
-                    empty: "Nenhum artefato encontrado"
+                    empty: "Nenhum artefato encontrado",
+                    groupIcon: "folder",
+                    listSubtitle: "Pastas de build que o projeto recria. As usadas nos últimos 7 dias ficam desmarcadas."
                 )
             case .installers:
                 ScanListView(
                     model: store.installers,
-                    icon: "shippingbox.fill",
+                    icon: "shippingbox",
                     title: "Instaladores",
                     subtitle: "Encontra arquivos .dmg, .pkg, .iso, .xip e .zip de instalação esquecidos em Downloads, Mesa, iCloud, Mail, Telegram e no cache do Homebrew.",
                     busy: "Procurando instaladores…",
-                    empty: "Nenhum instalador esquecido"
+                    empty: "Nenhum instalador esquecido",
+                    groupIcon: "tray.and.arrow.down",
+                    listSubtitle: "Arquivos de instalação que já cumpriram o papel."
                 )
             case .external:
                 ExternalCleanView()

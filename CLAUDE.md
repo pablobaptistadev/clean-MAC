@@ -19,7 +19,7 @@ Responder sempre em português (PT-BR), direto ao ponto.
 
 ## Regras de código
 - **Não usar `@State`, `@Bindable` nem outras macros do SwiftUI**: as Command Line Tools do macOS 27 não trazem o plugin `SwiftUIMacros` e o build quebra. Estado fica nos models `@Observable` (Observation funciona) e bindings são feitos com `Binding(get:set:)`.
-- Visual: layout do BuhoCleaner — barra lateral escura com as seções (`Sidebar`), área principal azul-marinho, telas iniciais com título + "Analisar" e ícone grande apagado na borda, anel de progresso, caixas de marcar quadradas (`TriCheckBox`), botões em pílula azul (`PillButtonStyle`) e barra inferior com "Selecionado | Total". Cores só em `Theme`; dados com cor (`Palette`).
+- Visual: layout do BuhoCleaner — barra lateral escura com as seções (`Sidebar`), área principal azul-marinho, telas iniciais com título + "Analisar" e ícone grande apagado na borda, anel de progresso, caixas de marcar quadradas (`TriCheckBox`), botões em pílula azul (`PillButtonStyle`) e barra inferior com "Selecionado | Total". Cores do sistema da Apple (iOS/macOS modo escuro: fundos #161618/#1C1C1E/#2C2C2E, azul #0A84FF), **nada em vermelho** (alertas e erros em laranja). Cores só em `Theme`; dados com cor (`Palette`).
 - Limpeza: o Lixo aparece sempre como primeira categoria quando tem itens. O que o usuário desmarca vira proteção temporária (`Whitelist.protectTemporarily`) só durante o `mo clean`.
 - Tudo que o app apaga vai para o Lixo, salvo opção explícita.
 - Comandos do Mole que exigem terminal real (seleção do `mo slim`, `mo touchid enable/disable`, tarefas com sudo) abrem no Terminal via `SettingsModel.runInTerminal`.
