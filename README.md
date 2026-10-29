@@ -28,6 +28,7 @@ Também em Ajustes › Atualizações do Limpo e no menu da barra (Procurar atua
 Tudo que é removido pelo app vai para a Lixeira.
 
 ## Requisitos
+- Mac com Apple Silicon (M1 ou mais novo); não roda em Mac com processador Intel
 - macOS 14+
 - Command Line Tools (`xcode-select --install`) ou Xcode
 - Mole: `brew install mole`

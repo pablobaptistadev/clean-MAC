@@ -18,4 +18,4 @@ Gravação de Tela e Áudio do Sistema › ative o PrintScreen.
 ```bash
 ./build-app.sh
 ```
-Requer macOS 14+ e as Command Line Tools (`xcode-select --install`).
+Requer Mac com Apple Silicon (M1 ou mais novo), macOS 14+ e as Command Line Tools (`xcode-select --install`).
