@@ -285,7 +285,7 @@ struct UninstallView: View {
             optionRow("Incluir dados pessoais do app", on: model.withData, help: "Equivale a --with-data: também remove documentos e dados que o app guardou") {
                 model.withData.toggle()
             }
-            optionRow("Apagar sem passar pelo Lixo", on: model.permanent, help: "Equivale a --permanent: não dá para desfazer") {
+            optionRow("Apagar sem passar pela Lixeira", on: model.permanent, help: "Equivale a --permanent: não dá para desfazer") {
                 model.permanent.toggle()
             }
             Spacer()

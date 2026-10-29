@@ -65,7 +65,7 @@ struct SlimView: View {
             HeroView(
                 icon: "scissors",
                 title: "Reduzir apps",
-                subtitle: "Em Macs com Apple Silicon, remove o código Intel de apps universais. Cada app é reduzido numa cópia que precisa passar na assinatura e no Gatekeeper; o original vai para o Lixo. Atualizações do app trazem o código Intel de volta.",
+                subtitle: "Em Macs com Apple Silicon, remove o código Intel de apps universais. Cada app é reduzido numa cópia que precisa passar na assinatura e no Gatekeeper; o original vai para a Lixeira. Atualizações do app trazem o código Intel de volta.",
                 button: "Analisar"
             ) {
                 Task { await model.scan() }

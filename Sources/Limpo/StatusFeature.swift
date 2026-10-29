@@ -558,7 +558,7 @@ struct StatusView: View {
                                 AlertBanner(alert: alert)
                             }
                             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: 4), spacing: 14) {
-                                // O Lixo vem primeiro sempre que tem itens.
+                                // A Lixeira vem primeiro sempre que tem itens.
                                 if (s.trash_size ?? 0) > 0 { trashCard(s) }
                                 healthCard(s)
                                 cpuCard(s, model)
@@ -696,17 +696,17 @@ struct StatusView: View {
     }
 
     private func trashCard(_ s: StatusSnapshot) -> some View {
-        MetricCard(title: "LIXO", symbol: "trash", badge: nil) {
+        MetricCard(title: "LIXEIRA", symbol: "trash", badge: nil) {
             let parts = Bytes.split(Int64(s.trash_size ?? 0))
             BigValue(value: parts.number, unit: parts.unit)
             Spacer(minLength: 0)
-            Button("Esvaziar Lixo…") {
+            Button("Esvaziar Lixeira…") {
                 let script = NSAppleScript(source: "tell application \"Finder\" to empty trash")
                 script?.executeAndReturnError(nil)
             }
             .buttonStyle(.plain)
             .foregroundStyle(Theme.accentLight)
-            Footnote(text: "Itens que o Limpo e você moveram para o Lixo")
+            Footnote(text: "Itens que o Limpo e você moveram para a Lixeira")
         }
         .frame(height: cardHeight)
     }

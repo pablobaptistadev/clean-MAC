@@ -128,7 +128,7 @@ struct CleanEntry: Identifiable, Hashable {
     }
 }
 
-/// Uma categoria da limpeza: uma seção do Mole (ou o Lixo), com os caminhos que ela apaga.
+/// Uma categoria da limpeza: uma seção do Mole (ou a Lixeira), com os caminhos que ela apaga.
 struct CleanCategory: Identifiable {
     let id: String
     let title: String
@@ -146,7 +146,7 @@ struct CleanCategory: Identifiable {
 
     /// Nome e descrição em português das seções do Mole.
     static let names: [String: (title: String, detail: String)] = [
-        trashID: ("Lixo", "Itens que estão no Lixo do Finder. Limpar esvazia o Lixo de vez."),
+        trashID: ("Lixeira", "Itens que estão na Lixeira do Finder. Limpar esvazia a Lixeira de vez."),
         "User essentials": ("Caches e logs de apps", "Caches que os apps recriam sozinhos e logs antigos. Sessões e histórico são mantidos."),
         "App caches": ("Caches do sistema", "Ajuda do macOS, Mapas, serviços de mídia da Apple e afins."),
         "Browsers": ("Navegadores", "Caches e versões antigas do Chrome, Edge, Firefox e outros. Senhas, abas e histórico são mantidos."),
@@ -163,10 +163,10 @@ struct CleanCategory: Identifiable {
         "Project artifacts": ("Artefatos de projetos", "Pastas de build recriáveis dos seus projetos.")
     ]
 
-    /// "Recomendados" deixa de fora o que dá trabalho recuperar: o Lixo e os caches de desenvolvimento.
+    /// "Recomendados" deixa de fora o que dá trabalho recuperar: a Lixeira e os caches de desenvolvimento.
     var recommended: Bool { !isTrash && id != "Developer tools" }
 
-    /// Junta a saída da prévia com a lista de caminhos (`clean-list.txt`). O Lixo vira a primeira categoria.
+    /// Junta a saída da prévia com a lista de caminhos (`clean-list.txt`). A Lixeira vira a primeira categoria.
     static func build(output: String, paths: [String: [CleanPath]]) -> [CleanCategory] {
         let trashPrefix = FS.home + "/.Trash/"
         var trash: [CleanEntry] = []
@@ -207,7 +207,7 @@ final class CleanModel {
     /// Quantos caminhos cada categoria aberta mostra (categorias com milhares de itens abrem aos poucos).
     var rowLimit: [String: Int] = [:]
     var protected: Set<String> = []
-    /// O Mole não conseguiu ler o Lixo: falta Acesso Total ao Disco para o Limpo.
+    /// O Mole não conseguiu ler a Lixeira: falta Acesso Total ao Disco para o Limpo.
     var trashBlocked = false
     var freed: Int64 = 0
     var log = ""
@@ -378,7 +378,7 @@ struct CleanView: View {
             HeroView(
                 icon: "bolt",
                 title: "Limpeza rápida",
-                subtitle: "Encontra e limpa caches, logs, arquivos temporários, o Lixo e restos de apps já desinstalados. Você revisa tudo antes.",
+                subtitle: "Encontra e limpa caches, logs, arquivos temporários, a Lixeira e restos de apps já desinstalados. Você revisa tudo antes.",
                 button: "Analisar",
                 error: model.error
             ) {
@@ -507,8 +507,8 @@ private struct CleanResultsView: View {
         HStack(spacing: 12) {
             Image(systemName: "trash").font(.system(size: 15)).foregroundStyle(Theme.warning)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Lixo").font(.system(size: 13, weight: .semibold))
-                Text("O macOS não deixa o Limpo ver o Lixo. Dê Acesso Total ao Disco ao Limpo e analise de novo para ver e esvaziar o Lixo aqui.")
+                Text("Lixeira").font(.system(size: 13, weight: .semibold))
+                Text("O macOS não deixa o Limpo ver a Lixeira. Dê Acesso Total ao Disco ao Limpo e analise de novo para ver e esvaziar a Lixeira aqui.")
                     .font(.system(size: 11.5))
                     .foregroundStyle(Theme.muted)
             }

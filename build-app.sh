@@ -45,7 +45,17 @@ cat > "$STAGE/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-codesign --force --deep --sign - "$STAGE"
+# Assinatura: com o certificado "Limpo Dev" (Acesso às Chaves › Assistente de Certificado, tipo
+# Assinatura de código) a identidade do app não muda entre versões e o macOS mantém as permissões.
+# Sem ele, assinatura provisória: o macOS pede as permissões de novo a cada versão.
+SIGN_ID="${LIMPO_SIGN_ID:-Limpo Dev}"
+if security find-identity -p codesigning 2>/dev/null | grep -q "\"$SIGN_ID\""; then
+  codesign --force --deep --sign "$SIGN_ID" "$STAGE"
+  echo "→ Assinado com \"$SIGN_ID\" (permissões mantidas entre versões)"
+else
+  codesign --force --deep --sign - "$STAGE"
+  echo "⚠ Certificado \"$SIGN_ID\" não encontrado: assinatura provisória (o macOS vai pedir as permissões de novo)"
+fi
 
 echo "→ Encerrando o Limpo aberto…"
 pkill -x Limpo 2>/dev/null || true

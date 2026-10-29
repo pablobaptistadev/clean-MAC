@@ -164,7 +164,7 @@ struct LargeFilesView: View {
             HeroView(
                 icon: "folder",
                 title: "Arquivos grandes",
-                subtitle: "Encontra os maiores arquivos da sua pasta de usuário. Os itens removidos vão para o Lixo, então dá para desfazer.",
+                subtitle: "Encontra os maiores arquivos da sua pasta de usuário. Os itens removidos vão para a Lixeira, então dá para desfazer.",
                 button: "Analisar",
                 error: model.error
             ) {
@@ -194,17 +194,17 @@ struct LargeFilesView: View {
                     selected: model.selectedBytes,
                     total: model.totalBytes,
                     selectedLabel: "Selecionado",
-                    button: "Mover para o Lixo",
+                    button: "Mover para a Lixeira",
                     enabled: !model.selected.isEmpty
                 ) {
                     model.confirmTrash = true
                 }
             }
-            .alert("Mover \(model.selected.count) arquivo(s) para o Lixo?", isPresented: Binding(get: { model.confirmTrash }, set: { model.confirmTrash = $0 })) {
+            .alert("Mover \(model.selected.count) arquivo(s) para a Lixeira?", isPresented: Binding(get: { model.confirmTrash }, set: { model.confirmTrash = $0 })) {
                 Button("Cancelar", role: .cancel) {}
-                Button("Mover para o Lixo", role: .destructive) { model.trashSelected() }
+                Button("Mover para a Lixeira", role: .destructive) { model.trashSelected() }
             } message: {
-                Text("\(Bytes.str(model.selectedBytes)) serão movidos. Você pode recuperar pelo Lixo.")
+                Text("\(Bytes.str(model.selectedBytes)) serão movidos. Você pode recuperar pela Lixeira.")
             }
         }
     }

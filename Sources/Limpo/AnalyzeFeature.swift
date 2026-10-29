@@ -191,16 +191,16 @@ struct ExplorerView: View {
             }
         }
         .alert(
-            "Mover \(model.pendingTrash?.name ?? "") para o Lixo?",
+            "Mover \(model.pendingTrash?.name ?? "") para a Lixeira?",
             isPresented: Binding(get: { model.pendingTrash != nil }, set: { if !$0 { model.pendingTrash = nil } })
         ) {
             Button("Cancelar", role: .cancel) { model.pendingTrash = nil }
-            Button("Mover para o Lixo", role: .destructive) {
+            Button("Mover para a Lixeira", role: .destructive) {
                 if let entry = model.pendingTrash { Task { await model.trash(entry) } }
                 model.pendingTrash = nil
             }
         } message: {
-            Text("\(Bytes.str(model.pendingTrash?.size ?? 0)). Dá para recuperar pelo Lixo.")
+            Text("\(Bytes.str(model.pendingTrash?.size ?? 0)). Dá para recuperar pela Lixeira.")
         }
     }
 
@@ -303,7 +303,7 @@ struct ExplorerView: View {
                     Label("Mostrar no Finder", systemImage: "magnifyingglass")
                 }
                 Divider()
-                Button { model.pendingTrash = entry } label: { Label("Mover para o Lixo…", systemImage: "trash") }
+                Button { model.pendingTrash = entry } label: { Label("Mover para a Lixeira…", systemImage: "trash") }
             } label: {
                 Image(systemName: "ellipsis").foregroundStyle(Theme.muted)
             }

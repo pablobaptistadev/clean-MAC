@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-// MARK: - Lista genérica "escanear → selecionar → mover para o Lixo"
+// MARK: - Lista genérica "escanear → selecionar → mover para a Lixeira"
 // Usada por Projetos (artefatos de build, como o `mo purge`) e Instaladores (como o `mo installer`).
 
 struct TrashItem: Identifiable, Hashable {
@@ -132,17 +132,17 @@ struct ScanListView: View {
                     selected: model.selectedBytes,
                     total: model.total,
                     selectedLabel: "Selecionado",
-                    button: "Mover para o Lixo",
+                    button: "Mover para a Lixeira",
                     enabled: !model.selected.isEmpty
                 ) {
                     model.confirm = true
                 }
             }
-            .alert("Mover \(model.selected.count) item(ns) para o Lixo?", isPresented: Binding(get: { model.confirm }, set: { model.confirm = $0 })) {
+            .alert("Mover \(model.selected.count) item(ns) para a Lixeira?", isPresented: Binding(get: { model.confirm }, set: { model.confirm = $0 })) {
                 Button("Cancelar", role: .cancel) {}
-                Button("Mover para o Lixo", role: .destructive) { model.trashSelected() }
+                Button("Mover para a Lixeira", role: .destructive) { model.trashSelected() }
             } message: {
-                Text("\(Bytes.str(model.selectedBytes)) serão movidos. Dá para recuperar pelo Lixo.")
+                Text("\(Bytes.str(model.selectedBytes)) serão movidos. Dá para recuperar pela Lixeira.")
             }
         }
     }

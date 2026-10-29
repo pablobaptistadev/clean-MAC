@@ -25,7 +25,7 @@ O Limpo procura uma versão nova ao abrir e uma vez por dia, na última Release 
 Quando acha, mostra um aviso na janela (e uma notificação): **Atualizar** baixa o `.dmg`, troca o app e reabre o Limpo.
 Também em Ajustes › Atualizações do Limpo e no menu da barra (Procurar atualizações do Limpo…).
 
-Tudo que é removido pelo app vai para o Lixo.
+Tudo que é removido pelo app vai para a Lixeira.
 
 ## Requisitos
 - macOS 14+
@@ -40,3 +40,6 @@ Compila, encerra o Limpo aberto e **substitui** o `/Applications/Limpo.app` (sem
 A versão fica no arquivo `VERSION`; o número de build é a data/hora da compilação.
 
 Instalador: `./build-app.sh --dmg` gera `~/Downloads/Limpo-<versão>.dmg`.
+
+## Outros apps neste repositório
+- **PrintScreen** (`printscreen/`): captura de tela no estilo do Lightshot, com atalho, marcações, copiar e salvar PNG. Veja `printscreen/README.md`.
