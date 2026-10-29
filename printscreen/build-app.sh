@@ -15,6 +15,16 @@ swift build -c release
 mkdir -p "$STAGE/Contents/MacOS" "$STAGE/Contents/Resources"
 cp .build/release/PrintScreen "$STAGE/Contents/MacOS/PrintScreen"
 
+# Ícone (Resources/AppIcon.png; para refazer: swift Resources/make-icon.swift Resources/AppIcon.png)
+ICONSET="$(mktemp -d)/AppIcon.iconset"
+mkdir -p "$ICONSET"
+for SZ in 16 32 128 256 512; do
+  sips -z $SZ $SZ Resources/AppIcon.png --out "$ICONSET/icon_${SZ}x${SZ}.png" >/dev/null
+  sips -z $((SZ * 2)) $((SZ * 2)) Resources/AppIcon.png --out "$ICONSET/icon_${SZ}x${SZ}@2x.png" >/dev/null
+done
+iconutil -c icns "$ICONSET" -o "$STAGE/Contents/Resources/AppIcon.icns"
+rm -rf "$(dirname "$ICONSET")"
+
 cat > "$STAGE/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -24,6 +34,7 @@ cat > "$STAGE/Contents/Info.plist" <<PLIST
     <key>CFBundleDisplayName</key><string>PrintScreen</string>
     <key>CFBundleIdentifier</key><string>br.com.pablobaptista.printscreen</string>
     <key>CFBundleExecutable</key><string>PrintScreen</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>${VERSION}</string>
     <key>CFBundleVersion</key><string>${BUILD}</string>
