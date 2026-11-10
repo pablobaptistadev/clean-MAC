@@ -12,12 +12,12 @@ App nativo (SwiftUI) para macOS com layout no estilo do BuhoCleaner (barra later
   - *Explorador* — mapa de disco navegável (`mo analyze --json`)
   - *Arquivos grandes*
 - **Apps** — `mo uninstall --list`, plano com `--dry-run` antes de remover
-- **Status** — `mo status --json` + lista completa de processos (`ps`) agrupada por app (Chrome e todos os helpers numa linha só; clique para ver cada processo), ordenável por memória, CPU, nome e PID; menu de cada processo: Por que está em execução?, Copiar PID, Mostrar no Finder, Encerrar
+- **Status** — `mo status --json` + lista completa de processos (`ps`) agrupada por app (Chrome e todos os helpers numa linha só; clique para ver cada processo), ordenável por memória, CPU, nome e PID; apps travados aparecem no topo com "não responde" (o mesmo aviso do Forçar Encerrar) e o botão Forçar encerramento; menu de cada processo: Por que está em execução?, Copiar PID, Mostrar no Finder, Encerrar
 - **Histórico** (ícone de relógio) — `mo history --json`
 - **Ajustes** (ícone de engrenagem) — proteções da limpeza/otimização, pastas de projetos, Touch ID para sudo (`mo touchid`), atualizar o Mole, abrir ao iniciar sessão
 
 ## Barra de menus
-- Clique: monitor em tempo real (CPU, GPU, memória, disco, rede, ventoinha, Bluetooth, top apps por memória (processos somados por app), contadores do histórico, Tela ligada)
+- Clique: monitor em tempo real (CPU, GPU, memória, disco, rede, ventoinha, Bluetooth, apps que não respondem (com Forçar), top apps por memória (processos somados por app), contadores do histórico, Tela ligada)
 - Clique direito: menu com todas as seções, Histórico, Ajustes, Manter tela ligada, Atualizar o Mole
 
 ## Atualizações

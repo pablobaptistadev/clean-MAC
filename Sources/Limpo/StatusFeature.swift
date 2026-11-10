@@ -349,14 +349,15 @@ enum Fmt {
 struct Chip: View {
     let text: String
     var strong = false
+    var color = Palette.memory
 
     var body: some View {
         Text(text)
             .font(.system(size: 11.5, weight: strong ? .semibold : .medium))
-            .foregroundStyle(strong ? Palette.memory : Color(white: 0.8))
+            .foregroundStyle(strong ? color : Color(white: 0.8))
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
-            .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(strong ? Palette.memory.opacity(0.18) : Color.white.opacity(0.08)))
+            .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(strong ? color.opacity(0.18) : Color.white.opacity(0.08)))
     }
 }
 

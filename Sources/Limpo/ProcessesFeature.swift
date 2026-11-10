@@ -72,6 +72,41 @@ struct ProcessGroup: Identifiable, ProcessMetrics {
     }
 }
 
+/// O "(não responde)" do Forçar Encerrar: o WindowServer marca o app que parou de tratar os eventos.
+/// Não há API pública para isso; as funções do SkyLight são carregadas na hora e, se faltarem numa versão do macOS, nada é marcado.
+@MainActor
+enum AppHang {
+    private typealias MainConnection = @convention(c) () -> Int32
+    private typealias IsUnresponsive = @convention(c) (Int32, UnsafeRawPointer) -> Bool
+    private typealias ProcessForPID = @convention(c) (pid_t, UnsafeMutableRawPointer) -> Int32
+
+    private static let api: (connection: Int32, isUnresponsive: IsUnresponsive, processForPID: ProcessForPID)? = {
+        _ = dlopen("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight", RTLD_NOW)
+        _ = dlopen("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices", RTLD_NOW)
+        let any = UnsafeMutableRawPointer(bitPattern: -2) // RTLD_DEFAULT
+        guard let connection = dlsym(any, "SLSMainConnectionID") ?? dlsym(any, "CGSMainConnectionID"),
+              let check = dlsym(any, "SLSEventIsAppUnresponsive") ?? dlsym(any, "CGSEventIsAppUnresponsive"),
+              let psn = dlsym(any, "GetProcessForPID") else { return nil }
+        return (unsafeBitCast(connection, to: MainConnection.self)(),
+                unsafeBitCast(check, to: IsUnresponsive.self),
+                unsafeBitCast(psn, to: ProcessForPID.self))
+    }()
+
+    static func isUnresponsive(_ pid: pid_t) -> Bool {
+        guard let api else { return false }
+        var psn: (UInt32, UInt32) = (0, 0) // ProcessSerialNumber
+        guard withUnsafeMutableBytes(of: &psn, { api.processForPID(pid, $0.baseAddress!) }) == 0 else { return false }
+        return withUnsafeBytes(of: &psn) { api.isUnresponsive(api.connection, $0.baseAddress!) }
+    }
+
+    /// Só apps com ícone no Dock têm janela para travar.
+    static func unresponsivePIDs() -> Set<Int32> {
+        Set(NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular && isUnresponsive($0.processIdentifier) }
+            .map(\.processIdentifier))
+    }
+}
+
 @MainActor
 @Observable
 final class ProcessModel {
@@ -87,6 +122,14 @@ final class ProcessModel {
     var info: ProcessDetails?
     /// Grupos abertos na lista (mostram cada processo do app).
     var expanded: Set<String> = []
+    /// PIDs dos apps que o macOS marca como "não responde".
+    var unresponsive: Set<Int32> = []
+
+    func isUnresponsive(_ g: ProcessGroup) -> Bool { unresponsive.contains(g.main.pid) }
+
+    var unresponsiveGroups: [ProcessGroup] {
+        unresponsive.isEmpty ? [] : Self.group(all).filter(isUnresponsive)
+    }
 
     func topByMemory(_ n: Int) -> [ProcessGroup] {
         Array(Self.group(all).sorted { $0.memoryBytes > $1.memoryBytes }.prefix(n))
@@ -108,7 +151,9 @@ final class ProcessModel {
         if !query.isEmpty {
             groups = groups.filter { $0.name.localizedCaseInsensitiveContains(query) || $0.members.contains(where: matches) }
         }
-        return sorted(groups)
+        // Apps travados ficam no topo, qualquer que seja a ordem escolhida.
+        let ordered = sorted(groups)
+        return ordered.filter(isUnresponsive) + ordered.filter { !isUnresponsive($0) }
     }
 
     /// Processos mostrados ao abrir um grupo; numa busca que não bate com o nome do app, só os que batem.
@@ -179,6 +224,7 @@ final class ProcessModel {
         do {
             let output = try await Shell.run("/bin/ps", ["-axww", "-o", "pid=,ppid=,rss=,%cpu=,user=,comm="])
             all = Self.parse(output)
+            unresponsive = AppHang.unresponsivePIDs()
             error = nil
         } catch {
             self.error = error.localizedDescription
@@ -262,6 +308,16 @@ final class ProcessModel {
             let answer = alert.runModal()
             guard answer != .alertThirdButtonReturn else { return }
             await terminate(g, force: answer == .alertSecondButtonReturn)
+        }
+    }
+
+    /// App travado não atende ao pedido de fechar: só forçando, como no Forçar Encerrar do macOS.
+    func confirmForceQuit(_ g: ProcessGroup) {
+        Task { @MainActor in
+            guard ask("Forçar o encerramento de \(g.name)?",
+                      "\(g.name) não está respondendo. Alterações não salvas serão perdidas.",
+                      button: "Forçar encerramento") else { return }
+            await terminate(g, force: true)
         }
     }
 
@@ -448,6 +504,11 @@ struct ProcessListView: View {
                 Chip(text: "\(zombies) zumbi\(zombies > 1 ? "s" : "")", strong: true)
                     .help("Processos encerrados que o processo pai ainda não recolheu. Somem quando o app pai é fechado.")
             }
+            let hung = model.unresponsive.count
+            if hung > 0 {
+                Chip(text: hung > 1 ? "\(hung) não respondem" : "1 não responde", strong: true, color: Theme.danger)
+                    .help("Apps travados (o macOS mostra \"não responde\" no Forçar Encerrar). Ficam no topo da lista.")
+            }
             Spacer()
             Toggle("Só meus", isOn: Binding(get: { model.onlyMine }, set: { model.onlyMine = $0 }))
                 .toggleStyle(.checkbox)
@@ -512,6 +573,7 @@ private struct ProcessRowView: View {
     var body: some View {
         let p = group
         let expandable = !isChild && p.count > 1
+        let hung = !isChild && model.isUnresponsive(p)
         HStack(spacing: 12) {
             Image(systemName: "chevron.right")
                 .font(.system(size: 9, weight: .bold))
@@ -532,15 +594,28 @@ private struct ProcessRowView: View {
             .frame(width: isChild ? 16 : 22, height: isChild ? 16 : 22)
             .padding(.leading, isChild ? 14 : 0)
 
-            VStack(alignment: .leading, spacing: 1) {
-                Text(p.name).lineLimit(1)
-                    .foregroundStyle(isChild ? Theme.muted : Theme.text)
-                let subtitle = [
-                    p.count > 1 ? "\(p.count) processos" : nil,
-                    p.main.user != NSUserName() ? p.main.user : nil
-                ].compactMap { $0 }.joined(separator: " · ")
-                if !subtitle.isEmpty {
-                    Text(subtitle).font(.system(size: 10.5)).foregroundStyle(Theme.muted)
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 6) {
+                        Text(p.name).lineLimit(1)
+                            .foregroundStyle(isChild ? Theme.muted : Theme.text)
+                        if hung {
+                            Text("não responde")
+                                .font(.system(size: 11.5, weight: .semibold))
+                                .foregroundStyle(Theme.danger)
+                        }
+                    }
+                    let subtitle = [
+                        p.count > 1 ? "\(p.count) processos" : nil,
+                        p.main.user != NSUserName() ? p.main.user : nil
+                    ].compactMap { $0 }.joined(separator: " · ")
+                    if !subtitle.isEmpty {
+                        Text(subtitle).font(.system(size: 10.5)).foregroundStyle(Theme.muted)
+                    }
+                }
+                Spacer(minLength: 0)
+                if hung {
+                    ForceQuitButton { model.confirmForceQuit(p) }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -575,7 +650,7 @@ private struct ProcessRowView: View {
         .font(.system(size: isChild ? 12.5 : 13.5))
         .padding(.horizontal, 20)
         .frame(height: isChild ? 32 : 40)
-        .background(isChild ? Color.black.opacity(0.12) : Color.clear)
+        .background(isChild ? Color.black.opacity(0.12) : hung ? Theme.danger.opacity(0.07) : Color.clear)
         .contentShape(Rectangle())
         .onTapGesture {
             guard expandable else { return }
@@ -583,6 +658,26 @@ private struct ProcessRowView: View {
         }
         .help(expandable ? "Clique para ver cada processo de \(p.name)" : "")
         .contextMenu { ProcessActions(group: p, model: model) }
+    }
+}
+
+/// Botão laranja das linhas de apps travados.
+struct ForceQuitButton: View {
+    var title = "Forçar encerramento"
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(Theme.danger)
+                .padding(.horizontal, 10)
+                .frame(height: 22)
+                .background(Capsule().fill(Theme.danger.opacity(0.16)))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .help("O app não está respondendo. Forçar o encerramento perde as alterações não salvas.")
     }
 }
 
@@ -616,6 +711,9 @@ struct ProcessActions: View {
         Button { model.copyPID(group.main) } label: { Label("Copiar PID", systemImage: "doc.on.doc") }
         Button { model.reveal(group.main) } label: { Label("Mostrar no Finder", systemImage: "folder") }
         Divider()
+        if model.isUnresponsive(group) {
+            Button { model.confirmForceQuit(group) } label: { Label("Forçar encerramento…", systemImage: "exclamationmark.triangle") }
+        }
         Button { model.confirmTerminate(group) } label: { Label("Encerrar…", systemImage: "xmark.circle") }
     }
 }

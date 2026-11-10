@@ -502,6 +502,27 @@ struct MonitorView: View {
 
     private func processes(_ procs: ProcessModel) -> some View {
         VStack(spacing: 0) {
+            // Apps travados primeiro, com o atalho para forçar o encerramento.
+            ForEach(procs.unresponsiveGroups) { p in
+                HStack(spacing: 8) {
+                    Group {
+                        if let icon = procs.icon(for: p.main) { Image(nsImage: icon).resizable() } else { Image(systemName: "gearshape").foregroundStyle(Theme.muted) }
+                    }
+                    .frame(width: 16, height: 16)
+                    Text(p.name).lineLimit(1)
+                    Text("não responde")
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(Theme.danger)
+                        .fixedSize()
+                    Spacer(minLength: 4)
+                    ForceQuitButton(title: "Forçar") { procs.confirmForceQuit(p) }
+                }
+                .font(.system(size: 13))
+                .padding(.vertical, 5)
+            }
+            if !procs.unresponsiveGroups.isEmpty {
+                Divider().overlay(Theme.hairline).padding(.vertical, 6)
+            }
             HStack {
                 Text("Principais processos").frame(maxWidth: .infinity, alignment: .leading)
                 Text("Memória").frame(width: 70, alignment: .trailing)
