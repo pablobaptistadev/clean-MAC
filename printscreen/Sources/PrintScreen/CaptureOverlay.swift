@@ -90,16 +90,25 @@ struct Mark {
 
 // MARK: - Controle da captura: uma janela por tela
 
+enum CaptureMode {
+    /// Foto da área, com marcações.
+    case screenshot
+    /// Escolher a área do vídeo (sem marcações).
+    case video
+}
+
 @MainActor
 final class CaptureController {
     private var windows: [OverlayWindow] = []
     private let onClose: () -> Void
+    private let onRecord: (NSScreen, CGRect?) -> Void
 
-    init(shots: [ScreenShot], onClose: @escaping () -> Void) {
+    init(shots: [ScreenShot], mode: CaptureMode, onRecord: @escaping (NSScreen, CGRect?) -> Void, onClose: @escaping () -> Void) {
         self.onClose = onClose
+        self.onRecord = onRecord
         for shot in shots {
             let window = OverlayWindow(screen: shot.screen)
-            let view = CaptureView(shot: shot, controller: self)
+            let view = CaptureView(shot: shot, mode: mode, controller: self)
             window.contentView = view
             windows.append(window)
         }
@@ -129,6 +138,12 @@ final class CaptureController {
         for window in windows { window.orderOut(nil) }
         windows = []
         onClose()
+    }
+
+    /// Fecha o seletor e grava a área (ou a tela inteira, se `rect` for nil).
+    func record(screen: NSScreen, rect: CGRect?) {
+        close()
+        onRecord(screen, rect)
     }
 }
 
@@ -167,6 +182,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     ]
 
     private let shot: ScreenShot
+    private let mode: CaptureMode
     private let image: NSImage
     private weak var controller: CaptureController?
 
@@ -185,8 +201,9 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     private var toolButtons: [Tool: ToolButton] = [:]
     private let colorButton = ToolButton(symbol: nil, help: "Cor")
 
-    init(shot: ScreenShot, controller: CaptureController?) {
+    init(shot: ScreenShot, mode: CaptureMode = .screenshot, controller: CaptureController?) {
         self.shot = shot
+        self.mode = mode
         self.image = NSImage(cgImage: shot.image, size: shot.screen.frame.size)
         self.controller = controller
         super.init(frame: CGRect(origin: .zero, size: shot.screen.frame.size))
@@ -223,9 +240,18 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         copy.onClick = { [weak self] in self?.copyToClipboard() }
         let save = ToolButton(symbol: "square.and.arrow.down", help: "Salvar PNG (⌘S)")
         save.onClick = { [weak self] in self?.saveAsPNG() }
+        let record = ToolButton(symbol: "record.circle", help: mode == .video ? "Gravar vídeo da área (Enter)" : "Gravar vídeo da área (⌘R)")
+        record.onClick = { [weak self] in self?.startRecording() }
         let close = ToolButton(symbol: "xmark", help: "Fechar (Esc)")
         close.onClick = { [weak self] in self?.controller?.close() }
-        for b in [copy, save, close] { actionBar.add(b) }
+        if mode == .video {
+            let start = LabelButton(symbol: "record.circle.fill", title: "Gravar", help: "Gravar vídeo da área (Enter)")
+            start.onClick = { [weak self] in self?.startRecording() }
+            actionBar.add(start)
+            actionBar.add(close)
+        } else {
+            for b in [copy, save, record, close] { actionBar.add(b) }
+        }
 
         for bar in [toolBar, actionBar] {
             bar.isHidden = true
@@ -300,7 +326,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
             actionBar.isHidden = true
             return
         }
-        toolBar.isHidden = false
+        toolBar.isHidden = mode == .video
         actionBar.isHidden = false
         let gap: CGFloat = 8
         let ts = toolBar.fittingSize
@@ -360,7 +386,9 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     }
 
     private func drawHint() {
-        let text = "Arraste para escolher a área · Esc cancela" as NSString
+        let text = (mode == .video
+            ? "Arraste para escolher a área do vídeo · Enter grava a tela inteira · Esc cancela"
+            : "Arraste para escolher a área · ⌘R grava vídeo · Esc cancela") as NSString
         let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 15, weight: .medium), .foregroundColor: NSColor.white]
         let size = text.size(withAttributes: attrs)
         let box = CGRect(x: bounds.midX - size.width / 2 - 16, y: bounds.midY - size.height / 2 - 10, width: size.width + 32, height: size.height + 20)
@@ -398,7 +426,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
                 drag = .resize(handle: index, original: sel)
                 return
             }
-            if let tool, sel.contains(p) {
+            if mode == .screenshot, let tool, sel.contains(p) {
                 if tool == .text {
                     beginText(at: p)
                 } else {
@@ -546,11 +574,16 @@ final class CaptureView: NSView, NSTextFieldDelegate {
             if textField != nil { cancelText() } else { controller?.close() }
             return
         }
+        if mode == .video, event.keyCode == 36 || event.keyCode == 76 { // Enter / Enter do teclado numérico
+            startRecording()
+            return
+        }
         if flags.contains(.command) {
             switch event.charactersIgnoringModifiers?.lowercased() {
-            case "c": copyToClipboard(); return
-            case "s": saveAsPNG(); return
+            case "c" where mode == .screenshot: copyToClipboard(); return
+            case "s" where mode == .screenshot: saveAsPNG(); return
             case "z": undo(); return
+            case "r": startRecording(); return
             default: break
             }
         }
@@ -603,6 +636,13 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         let image = NSImage(size: sel.size)
         image.addRepresentation(rep)
         return (image, png)
+    }
+
+    /// Grava a área escolhida; sem área, a tela inteira. As marcações não entram no vídeo.
+    private func startRecording() {
+        commitText()
+        let rect = selection.flatMap { $0.width >= 8 && $0.height >= 8 ? $0.integral : nil }
+        controller?.record(screen: shot.screen, rect: rect)
     }
 
     private func copyToClipboard() {
@@ -693,6 +733,42 @@ final class ToolbarView: NSVisualEffectView {
     override var fittingSize: NSSize { stack.fittingSize }
 }
 
+/// Botão principal com texto (azul do sistema), como o "Gravar" do modo vídeo.
+final class LabelButton: NSButton {
+    var onClick: (() -> Void)?
+
+    init(symbol: String, title: String, help: String) {
+        super.init(frame: .zero)
+        image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 13, weight: .semibold))
+        imagePosition = .imageLeading
+        imageHugsTitle = true
+        attributedTitle = NSAttributedString(string: " " + title, attributes: [
+            .font: NSFont.systemFont(ofSize: 13, weight: .semibold), .foregroundColor: NSColor.white
+        ])
+        contentTintColor = .white
+        isBordered = false
+        toolTip = help
+        wantsLayer = true
+        layer?.cornerRadius = 7
+        layer?.backgroundColor = NSColor.systemBlue.cgColor
+        target = self
+        action = #selector(clicked)
+        translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 32),
+            widthAnchor.constraint(equalToConstant: intrinsicContentSize.width + 24)
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) não é usado") }
+
+    // Responde já no primeiro clique, mesmo com o PrintScreen em segundo plano (cronômetro da gravação).
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    @objc private func clicked() { onClick?() }
+}
+
 final class ToolButton: NSButton {
     var onClick: (() -> Void)?
     var isActive = false {
@@ -721,6 +797,9 @@ final class ToolButton: NSButton {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) não é usado") }
+
+    // Responde já no primeiro clique, mesmo com o PrintScreen em segundo plano (cronômetro da gravação).
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     @objc private func clicked() { onClick?() }
 }

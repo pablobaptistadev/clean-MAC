@@ -23,6 +23,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem?
     private var capture: CaptureController?
     private var settings: SettingsWindowController?
+    private var recording: RecordingController?
+    private var startingRecording = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.appearance = NSAppearance(named: .darkAqua)
@@ -35,7 +37,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         item.menu = menu
         statusItem = item
 
-        HotKey.shared.onPress = { [weak self] in self?.startCapture() }
+        // Durante uma gravação, o mesmo atalho para e salva o vídeo.
+        HotKey.shared.onPress = { [weak self] in
+            guard let self else { return }
+            if let recording = self.recording { recording.stop() } else { self.startCapture() }
+        }
         if !HotKey.shared.register(Shortcut.load()) {
             showSettings()
         }
@@ -47,6 +53,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let capture = NSMenuItem(title: "Capturar tela   \(Shortcut.load().display)", action: #selector(captureFromMenu), keyEquivalent: "")
         capture.image = NSImage(systemSymbolName: "camera.viewfinder", accessibilityDescription: nil)
         menu.addItem(capture)
+        let video = NSMenuItem(title: "Gravar vídeo…", action: #selector(recordFromMenu), keyEquivalent: "")
+        video.image = NSImage(systemSymbolName: "record.circle", accessibilityDescription: nil)
+        menu.addItem(video)
+        let folder = NSMenuItem(title: "Abrir pasta dos vídeos", action: #selector(openVideosFolder), keyEquivalent: "")
+        folder.image = NSImage(systemSymbolName: "film.stack", accessibilityDescription: nil)
+        menu.addItem(folder)
+        menu.addItem(.separator())
         let shortcut = NSMenuItem(title: "Atalho…", action: #selector(openSettings), keyEquivalent: ",")
         shortcut.image = NSImage(systemSymbolName: "keyboard", accessibilityDescription: nil)
         menu.addItem(shortcut)
@@ -63,6 +76,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in self?.startCapture() }
     }
 
+    @objc private func recordFromMenu() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in self?.startCapture(mode: .video) }
+    }
+
+    @objc private func openVideosFolder() {
+        let folder = RecordingController.folder
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(folder)
+    }
+
     @objc private func openSettings() { showSettings() }
 
     @objc private func quit() { NSApp.terminate(nil) }
@@ -72,8 +95,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settings?.show()
     }
 
-    func startCapture() {
-        guard capture == nil else { return }
+    func startCapture(mode: CaptureMode = .screenshot) {
+        guard capture == nil, recording == nil, !startingRecording else { return }
         guard ScreenCapture.hasPermission() else {
             ScreenCapture.askPermission()
             return
@@ -82,11 +105,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             do {
                 let shots = try await ScreenCapture.captureAllScreens()
                 guard !shots.isEmpty else { return }
-                let controller = CaptureController(shots: shots) { self.capture = nil }
+                let controller = CaptureController(shots: shots, mode: mode,
+                                                   onRecord: { screen, rect in self.startRecording(screen: screen, rect: rect) },
+                                                   onClose: { self.capture = nil })
                 capture = controller
                 controller.show()
             } catch {
                 ScreenCapture.askPermission(error: error)
+            }
+        }
+    }
+
+    func startRecording(screen: NSScreen, rect: CGRect?) {
+        guard recording == nil, !startingRecording, let statusItem else { return }
+        startingRecording = true
+        Task {
+            defer { startingRecording = false }
+            do {
+                recording = try await RecordingController.start(screen: screen, rect: rect, statusItem: statusItem) {
+                    self.recording = nil
+                }
+            } catch {
+                RecordingController.alert("Não foi possível começar a gravar", error.localizedDescription)
             }
         }
     }

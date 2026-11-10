@@ -24,6 +24,11 @@ Responder sempre em português (PT-BR), direto ao ponto.
 - `ScreenCapture.swift` — captura das telas e pedido de permissão de Gravação de Tela.
 - `CaptureOverlay.swift` — seletor (mover/redimensionar), marcações (`Mark`: lápis, seta, quadrado, círculo, texto), cor, copiar e salvar PNG.
 - `SettingsWindow.swift` — janela para gravar o atalho.
+- `ScreenRecorder.swift` — gravação de vídeo (`SCStream` → `AVAssetWriter`): HEVC em MP4, até 1080p, 30 fps,
+  só quadros `.complete` (tela parada não gera quadro) e `endSession` estica o último até o fim. Exclui as janelas do próprio app.
+- `Recording.swift` — gravação em andamento: contorno da área, cronômetro (`RecordingHUD`), ícone de parar na barra de menus,
+  salvar em ~/Movies/PrintScreen (fora das pastas protegidas pelo TCC), copiar e mostrar no Finder.
 
-## Fase 1 (feito)
-Atalho configurável · seletor de área com tamanho em pixels · seta, lápis, quadrado, círculo, texto, cor · copiar · salvar PNG.
+## Feito
+Atalho configurável · seletor de área com tamanho em pixels · seta, lápis, quadrado, círculo, texto, cor · copiar · salvar PNG ·
+gravar vídeo HEVC leve da área ou da tela inteira (0.2.0).

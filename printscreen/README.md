@@ -10,6 +10,16 @@ Captura de tela para macOS no estilo do Lightshot: aperte o atalho, escolha a á
 
 Funciona em todas as telas conectadas e captura na resolução real (Retina).
 
+## Gravar vídeo
+- **Começar:** ícone da barra de menus › Gravar vídeo… e arraste a área (Enter grava a tela inteira).
+  Ou, numa captura normal, escolha a área e clique em ⏺ (⌘R).
+- **Parar:** botão ■ do cronômetro, ícone da barra de menus ou o mesmo atalho da captura (⇧⌘2).
+- **Arquivo:** MP4 em HEVC (H.265), no máximo Full HD (1080p), 30 fps. Quadros só são gravados quando a tela muda,
+  então um minuto costuma ficar entre 1 e 5 MB. O cursor aparece; o som não é gravado.
+- **Onde fica:** Filmes › PrintScreen. Ao parar, o vídeo é copiado (dá para colar no WhatsApp, Slack ou e-mail)
+  e aparece selecionado no Finder.
+- O contorno da área e o cronômetro não aparecem no vídeo. As marcações da captura também não entram.
+
 ## Permissão
 Na primeira captura o macOS pede **Gravação de Tela**: Ajustes do Sistema › Privacidade e Segurança ›
 Gravação de Tela e Áudio do Sistema › ative o PrintScreen.
