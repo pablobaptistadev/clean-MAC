@@ -14,6 +14,10 @@ Funciona em todas as telas conectadas e captura na resolução real (Retina).
 Na primeira captura o macOS pede **Gravação de Tela**: Ajustes do Sistema › Privacidade e Segurança ›
 Gravação de Tela e Áudio do Sistema › ative o PrintScreen.
 
+Se o macOS continuar pedindo com o PrintScreen já ativado, a autorização é de uma versão anterior do app
+(acontece a cada atualização enquanto ele não for assinado com o certificado "Limpo Dev"). No aviso do
+PrintScreen, clique em **Refazer autorização**, ative de novo e escolha Sair e Reabrir.
+
 ## Instalar / atualizar
 ```bash
 ./build-app.sh
