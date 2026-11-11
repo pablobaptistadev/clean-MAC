@@ -36,7 +36,7 @@ enum Tool: String, CaseIterable {
 struct Mark {
     let tool: Tool
     var points: [CGPoint]
-    let color: NSColor
+    var color: NSColor
     var text = ""
     /// Espessura do traço em pontos. No texto, define o tamanho da letra; no desfoque, a intensidade.
     var width: CGFloat = Mark.defaultWidth
@@ -46,7 +46,11 @@ struct Mark {
 
     static let defaultWidth: CGFloat = 3
     static let widthRange: ClosedRange<CGFloat> = 1...20
-    static func font(for width: CGFloat) -> NSFont { .systemFont(ofSize: 16 + 2 * width, weight: .semibold) }
+    static let minFontSize: CGFloat = 10
+    static let maxFontSize: CGFloat = 200
+    static func font(for width: CGFloat) -> NSFont {
+        .systemFont(ofSize: min(max(16 + 2 * width, minFontSize), maxFontSize), weight: .semibold)
+    }
     /// Raio do desfoque em pontos: forte o bastante para apagar texto já na espessura padrão.
     static func blurRadius(for width: CGFloat) -> CGFloat { 4 + width * 2 }
 
@@ -167,6 +171,7 @@ final class CaptureController {
         let main = windows.first { $0.frame.contains(mouse) } ?? windows.first
         main?.makeKey()
         main?.makeFirstResponder(main?.contentView)
+        NSCursor.crosshair.set()
     }
 
     /// Só uma tela tem seleção por vez.
@@ -208,6 +213,7 @@ final class OverlayWindow: NSWindow {
         hasShadow = false
         isReleasedWhenClosed = false
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        acceptsMouseMovedEvents = true
         setFrame(screen.frame, display: false)
     }
 
@@ -225,6 +231,8 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         case move(offset: CGPoint)
         case resize(handle: Int, original: CGRect)
         case draw
+        case moveMark(index: Int, start: CGPoint, original: Mark)
+        case resizeMark(index: Int, handle: Int, original: Mark)
     }
 
     static let palette: [(name: String, color: NSColor)] = [
@@ -243,7 +251,15 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     private var tool: Tool?
     private var color: NSColor = .systemRed
     private(set) var marks: [Mark] = []
-    private var redoStack: [Mark] = []
+    /// Histórico: cada passo guarda as marcações como estavam antes da mudança.
+    private var undoStack: [[Mark]] = []
+    private var redoStack: [[Mark]] = []
+    private var historyKey: String?
+    private var historyTime = Date.distantPast
+    /// Marcação selecionada (alças azuis): arrasta para mover, alças mudam o tamanho.
+    private(set) var selectedMark: Int?
+    private var editStart: [Mark]?
+    private var markChanged = false
     private var current: Mark?
     private var lineWidth = CaptureView.savedLineWidth()
     private var scrollAccumulator: CGFloat = 0
@@ -254,6 +270,9 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     private static let ciContext = CIContext(options: [.cacheIntermediates: false])
     private var textField: NSTextField?
     private var textOrigin: CGPoint = .zero
+    private var textWidth = Mark.defaultWidth
+    /// Texto existente aberto com duplo clique (volta para o lugar se cancelar).
+    private var textEditing: (index: Int, original: Mark)?
 
     private let toolBar = ToolbarView()
     private let actionBar = ToolbarView()
@@ -286,8 +305,41 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     override var acceptsFirstResponder: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    override func resetCursorRects() {
-        addCursorRect(bounds, cursor: .crosshair)
+    // MARK: Cursor
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas where area.owner === self { removeTrackingArea(area) }
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .cursorUpdate, .activeAlways, .inVisibleRect], owner: self))
+    }
+
+    override func mouseMoved(with event: NSEvent) { updateCursor(at: convert(event.locationInWindow, from: nil)) }
+    override func cursorUpdate(with event: NSEvent) { updateCursor(at: convert(event.locationInWindow, from: nil)) }
+
+    private func updateCursor(at p: CGPoint) {
+        guard case .none = drag else { return }
+        cursor(at: p).set()
+    }
+
+    /// Mãozinha onde dá para mover (marcações e a área), setas nas alças, cruz para desenhar ou escolher outra área.
+    func cursor(at p: CGPoint) -> NSCursor {
+        for bar in [toolBar, actionBar] where !bar.isHidden && bar.frame.contains(p) { return .arrow }
+        if let field = textField, field.frame.contains(p) { return .iBeam }
+        guard editing, let sel = selection else { return .crosshair }
+        if mode == .screenshot, let i = selectedMark, marks.indices.contains(i),
+           let handle = marks[i].handles.first(where: { hypot($0.point.x - p.x, $0.point.y - p.y) <= 8 }) {
+            return handle.id >= Mark.startHandle ? .crosshair : Cursors.resize(handle: handle.id)
+        }
+        if let index = handles(of: sel).firstIndex(where: { hypot($0.x - p.x, $0.y - p.y) <= 7 }) {
+            return Cursors.resize(handle: index)
+        }
+        if mode == .screenshot, markIndex(at: p) != nil { return .openHand }
+        guard sel.contains(p) else { return .crosshair }
+        switch tool {
+        case nil: return .openHand
+        case .text?: return .iBeam
+        default: return .crosshair
+        }
     }
 
     // MARK: Barras de ferramentas
@@ -340,6 +392,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
 
     private func choose(_ t: Tool) {
         commitText()
+        selectMark(nil)
         tool = tool == t ? nil : t
         for (k, b) in toolButtons { b.isActive = k == tool }
     }
@@ -380,8 +433,18 @@ final class CaptureView: NSView, NSTextFieldDelegate {
 
     @objc private func pickColor(_ sender: NSMenuItem) {
         guard let picked = sender.representedObject as? NSColor else { return }
+        applyColor(picked)
+    }
+
+    private func applyColor(_ picked: NSColor) {
         color = picked
         updateColorButton()
+        textField?.textColor = picked
+        if let i = selectedMark, marks.indices.contains(i), marks[i].tool != .blur {
+            pushHistory(key: "cor-\(i)")
+            marks[i].color = picked
+            needsDisplay = true
+        }
     }
 
     @objc private func openColorPanel() {
@@ -394,8 +457,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     }
 
     @objc private func colorPanelChanged(_ sender: NSColorPanel) {
-        color = sender.color
-        updateColorButton()
+        applyColor(sender.color)
     }
 
     private func layoutToolbars() {
@@ -449,6 +511,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
             outline.stroke()
         }
         NSGraphicsContext.restoreGraphicsState()
+        if let i = selectedMark, marks.indices.contains(i) { drawSelection(of: marks[i]) }
 
         let border = NSBezierPath(rect: sel.insetBy(dx: -0.5, dy: -0.5))
         border.lineWidth = 1
@@ -471,6 +534,26 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         if let widthHint { drawWidthHint(at: widthHint) }
     }
 
+    /// Contorno tracejado e alças redondas (azul do sistema) da marcação selecionada.
+    private func drawSelection(of mark: Mark) {
+        let accent = NSColor.systemBlue
+        if mark.tool != .line && mark.tool != .arrow {
+            let outline = NSBezierPath(rect: mark.frame.insetBy(dx: -3, dy: -3))
+            outline.lineWidth = 1
+            outline.setLineDash([4, 3], count: 2, phase: 0)
+            accent.setStroke()
+            outline.stroke()
+        }
+        for handle in mark.handles {
+            let dot = NSBezierPath(ovalIn: CGRect(x: handle.point.x - 5, y: handle.point.y - 5, width: 10, height: 10))
+            NSColor.white.setFill()
+            dot.fill()
+            dot.lineWidth = 1.5
+            accent.setStroke()
+            dot.stroke()
+        }
+    }
+
     /// Bolinha do tamanho do traço junto do cursor, enquanto a roda do mouse muda a espessura.
     private func drawWidthHint(at p: CGPoint) {
         let d = max(lineWidth, 2)
@@ -481,7 +564,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         NSColor.white.withAlphaComponent(0.9).setStroke()
         dot.stroke()
         let label: String
-        switch tool {
+        switch selectedMark.flatMap({ marks.indices.contains($0) ? marks[$0].tool : nil }) ?? tool {
         case .text: label = "Texto \(Int(Mark.font(for: lineWidth).pointSize)) pt"
         case .blur: label = "Desfoque \(Int(lineWidth))"
         default: label = "\(Int(lineWidth)) px"
@@ -531,10 +614,34 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         let p = convert(event.locationInWindow, from: nil)
         commitText()
         if editing, let sel = selection {
+            // 1) Alças da marcação selecionada: muda o tamanho.
+            if mode == .screenshot, let i = selectedMark, marks.indices.contains(i),
+               let handle = marks[i].handles.first(where: { hypot($0.point.x - p.x, $0.point.y - p.y) <= 8 }) {
+                beginMarkEdit()
+                drag = .resizeMark(index: i, handle: handle.id, original: marks[i])
+                return
+            }
+            // 2) Alças da área.
             if let index = handles(of: sel).firstIndex(where: { hypot($0.x - p.x, $0.y - p.y) <= 7 }) {
                 drag = .resize(handle: index, original: sel)
                 return
             }
+            if mode == .screenshot {
+                // 3) Clique numa marcação: seleciona e arrasta para mover. Duplo clique num texto edita.
+                if let i = markIndex(at: p) {
+                    if event.clickCount >= 2, marks[i].tool == .text {
+                        editText(at: i)
+                        return
+                    }
+                    selectMark(i)
+                    beginMarkEdit()
+                    drag = .moveMark(index: i, start: p, original: marks[i])
+                    NSCursor.closedHand.set()
+                    return
+                }
+                selectMark(nil)
+            }
+            // 4) Desenhar com a ferramenta escolhida.
             if mode == .screenshot, let tool, sel.contains(p) {
                 if tool == .text {
                     beginText(at: p)
@@ -549,16 +656,17 @@ final class CaptureView: NSView, NSTextFieldDelegate {
                 }
                 return
             }
+            // 5) Sem ferramenta: arrasta a área.
             if tool == nil, sel.contains(p) {
                 drag = .move(offset: CGPoint(x: p.x - sel.minX, y: p.y - sel.minY))
+                NSCursor.closedHand.set()
                 return
             }
         }
         // Começa uma área nova (as marcações da anterior são descartadas).
         controller?.selectionStarted(in: self)
         marks = []
-        redoStack = []
-        updateHistoryButtons()
+        resetHistory()
         editing = false
         selection = CGRect(origin: p, size: .zero)
         drag = .select(start: p)
@@ -588,6 +696,14 @@ final class CaptureView: NSView, NSTextFieldDelegate {
                 mark.points[1] = event.modifierFlags.contains(.shift) ? clamp(Mark.constrained(mark.tool, from: mark.points[0], to: p)) : p
             }
             current = mark
+        case .moveMark(let i, let start, let original):
+            guard marks.indices.contains(i) else { return }
+            marks[i] = previewBlur(original.moved(by: p.x - start.x, p.y - start.y))
+            markChanged = true
+        case .resizeMark(let i, let handle, let original):
+            guard marks.indices.contains(i) else { return }
+            marks[i] = previewBlur(original.resized(handle: handle, to: p))
+            markChanged = true
         case .none:
             return
         }
@@ -611,11 +727,86 @@ final class CaptureView: NSView, NSTextFieldDelegate {
                 }
             }
             current = nil
+        case .moveMark(let i, _, _), .resizeMark(let i, _, _):
+            finishMarkEdit(i)
         default:
             break
         }
         drag = .none
         layoutToolbars()
+        needsDisplay = true
+        updateCursor(at: convert(event.locationInWindow, from: nil))
+    }
+
+    // MARK: Editar marcações
+
+    /// Marcação sob o cursor (a de cima primeiro). A selecionada também pega cliques dentro do retângulo dela.
+    private func markIndex(at p: CGPoint) -> Int? {
+        if let i = selectedMark, marks.indices.contains(i), marks[i].tool != .line, marks[i].tool != .arrow,
+           marks[i].frame.insetBy(dx: -6, dy: -6).contains(p) {
+            return i
+        }
+        return marks.indices.reversed().first { marks[$0].contains(p) }
+    }
+
+    /// Seleciona (ou tira a seleção). A cor e a espessura da barra passam a ser as da marcação.
+    private func selectMark(_ index: Int?) {
+        selectedMark = index
+        if let index, marks.indices.contains(index) {
+            let mark = marks[index]
+            if mark.tool != .blur {
+                color = mark.color
+                updateColorButton()
+            }
+            lineWidth = min(max(mark.width.rounded(), Mark.widthRange.lowerBound), Mark.widthRange.upperBound)
+            thickness.value = lineWidth
+        }
+        needsDisplay = true
+    }
+
+    private func beginMarkEdit() {
+        editStart = marks
+        markChanged = false
+    }
+
+    private func finishMarkEdit(_ i: Int) {
+        defer { editStart = nil }
+        guard markChanged, let start = editStart, marks.indices.contains(i) else { return }
+        pushHistory(start)
+        if marks[i].tool == .blur, let crop = blurCrop(marks[i]) {
+            marks[i].blur = crop.image
+            marks[i].blurFrame = crop.frame
+        }
+    }
+
+    /// Desfoque sendo movido ou redimensionado: usa a tela toda desfocada até soltar (aí recorta de novo).
+    private func previewBlur(_ mark: Mark) -> Mark {
+        guard mark.tool == .blur else { return mark }
+        var mark = mark
+        mark.blur = blurredScreen(for: mark.width)
+        mark.blurFrame = bounds
+        return mark
+    }
+
+    private func deleteSelectedMark() {
+        guard let i = selectedMark, marks.indices.contains(i) else { return }
+        pushHistory()
+        marks.remove(at: i)
+        selectedMark = nil
+        updateHistoryButtons()
+        needsDisplay = true
+    }
+
+    /// Setas do teclado empurram a marcação selecionada (com Shift, de 10 em 10).
+    private func nudgeSelectedMark(dx: CGFloat, dy: CGFloat) {
+        guard let i = selectedMark, marks.indices.contains(i) else { return }
+        pushHistory(key: "empurrar-\(i)")
+        var mark = marks[i].moved(by: dx, dy)
+        if mark.tool == .blur, let crop = blurCrop(mark) {
+            mark.blur = crop.image
+            mark.blurFrame = crop.frame
+        }
+        marks[i] = mark
         needsDisplay = true
     }
 
@@ -624,18 +815,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     }
 
     private func resized(_ r: CGRect, handle: Int, to p: CGPoint) -> CGRect {
-        var minX = r.minX, minY = r.minY, maxX = r.maxX, maxY = r.maxY
-        switch handle {
-        case 0: minX = p.x; minY = p.y
-        case 1: minY = p.y
-        case 2: maxX = p.x; minY = p.y
-        case 3: maxX = p.x
-        case 4: maxX = p.x; maxY = p.y
-        case 5: maxY = p.y
-        case 6: minX = p.x; maxY = p.y
-        default: minX = p.x
-        }
-        return CGRect(x: min(minX, maxX), y: min(minY, maxY), width: max(abs(maxX - minX), 4), height: max(abs(maxY - minY), 4))
+        Mark.resize(r, handle: handle, to: p)
     }
 
     func clearSelection() {
@@ -643,19 +823,20 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         selection = nil
         editing = false
         marks = []
-        redoStack = []
-        updateHistoryButtons()
+        resetHistory()
         layoutToolbars()
         needsDisplay = true
     }
 
     // MARK: Texto
 
-    private func beginText(at p: CGPoint) {
-        let font = Mark.font(for: lineWidth)
+    private func beginText(at p: CGPoint, text: String = "", color textColor: NSColor? = nil, width: CGFloat? = nil) {
+        textWidth = width ?? lineWidth
+        let font = Mark.font(for: textWidth)
         let field = NSTextField(frame: CGRect(x: p.x, y: p.y, width: 260, height: ceil(font.pointSize * 1.4)))
         field.font = font
-        field.textColor = color
+        field.stringValue = text
+        field.textColor = textColor ?? color
         field.isBordered = false
         field.drawsBackground = false
         field.focusRingType = .none
@@ -664,9 +845,22 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         field.target = self
         field.action = #selector(textFieldEnter(_:))
         addSubview(field)
+        fitTextField(field)
         window?.makeFirstResponder(field)
         textField = field
         textOrigin = CGPoint(x: p.x + 2, y: p.y + 2)
+    }
+
+    /// Duplo clique num texto: abre para editar no mesmo lugar, com a mesma cor e tamanho.
+    private func editText(at i: Int) {
+        let mark = marks[i]
+        guard let origin = mark.points.first else { return }
+        pushHistory()
+        marks.remove(at: i)
+        selectedMark = nil
+        textEditing = (i, mark)
+        beginText(at: CGPoint(x: origin.x - 2, y: origin.y - 2), text: mark.text, color: mark.color, width: mark.width)
+        needsDisplay = true
     }
 
     @objc private func textFieldEnter(_ sender: NSTextField) {
@@ -679,7 +873,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     }
 
     private func fitTextField(_ field: NSTextField) {
-        let font = field.font ?? Mark.font(for: lineWidth)
+        let font = field.font ?? Mark.font(for: textWidth)
         let width = (field.stringValue as NSString).size(withAttributes: [.font: font]).width
         field.frame.size = CGSize(width: max(260, width + 30), height: ceil(font.pointSize * 1.4))
     }
@@ -687,25 +881,56 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     private func commitText() {
         guard let field = textField else { return }
         let text = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !text.isEmpty { addMark(Mark(tool: .text, points: [textOrigin], color: field.textColor ?? color, text: text, width: lineWidth)) }
         field.removeFromSuperview()
         textField = nil
+        if let editing = textEditing {
+            // Texto existente: volta para a mesma posição na pilha (apagar todo o texto remove a marcação).
+            textEditing = nil
+            if !text.isEmpty {
+                var mark = editing.original
+                mark.text = text
+                mark.color = field.textColor ?? mark.color
+                mark.width = textWidth
+                marks.insert(mark, at: min(editing.index, marks.count))
+            }
+            updateHistoryButtons()
+        } else if !text.isEmpty {
+            addMark(Mark(tool: .text, points: [textOrigin], color: field.textColor ?? color, text: text, width: textWidth))
+        }
         needsDisplay = true
     }
 
     private func cancelText() {
         textField?.removeFromSuperview()
         textField = nil
+        if let editing = textEditing {
+            textEditing = nil
+            marks.insert(editing.original, at: min(editing.index, marks.count))
+            if !undoStack.isEmpty { undoStack.removeLast() }
+            updateHistoryButtons()
+        }
         window?.makeFirstResponder(self)
+        needsDisplay = true
     }
 
     // MARK: Teclado
 
     override func keyDown(with event: NSEvent) {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        if event.keyCode == 53 { // Esc
-            if textField != nil { cancelText() } else { controller?.close() }
+        if event.keyCode == 53 { // Esc: cancela o texto, depois tira a seleção, depois fecha
+            cancelOperation(nil)
             return
+        }
+        if selectedMark != nil, flags.intersection([.command, .control, .option]).isEmpty {
+            let step: CGFloat = flags.contains(.shift) ? 10 : 1
+            switch event.keyCode {
+            case 51, 117: deleteSelectedMark(); return // Delete / Delete para a frente
+            case 123: nudgeSelectedMark(dx: -step, dy: 0); return
+            case 124: nudgeSelectedMark(dx: step, dy: 0); return
+            case 125: nudgeSelectedMark(dx: 0, dy: step); return
+            case 126: nudgeSelectedMark(dx: 0, dy: -step); return
+            default: break
+            }
         }
         if mode == .video, event.keyCode == 36 || event.keyCode == 76 { // Enter / Enter do teclado numérico
             startRecording()
@@ -727,7 +952,13 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     }
 
     override func cancelOperation(_ sender: Any?) {
-        if textField != nil { cancelText() } else { controller?.close() }
+        if textField != nil {
+            cancelText()
+        } else if selectedMark != nil {
+            selectMark(nil)
+        } else {
+            controller?.close()
+        }
     }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
@@ -775,28 +1006,58 @@ final class CaptureView: NSView, NSTextFieldDelegate {
 
     // MARK: Desfazer / refazer
 
-    private func addMark(_ mark: Mark) {
-        marks.append(mark)
+    /// Guarda as marcações de antes de uma mudança. Mudanças seguidas com a mesma `key` (roda do mouse, cor, setas)
+    /// viram um passo só, para o ⌘Z não ter que voltar de um em um.
+    private func pushHistory(_ snapshot: [Mark]? = nil, key: String? = nil) {
+        let now = Date()
+        if let key, key == historyKey, now.timeIntervalSince(historyTime) < 1.5 {
+            historyTime = now
+            return
+        }
+        historyKey = key
+        historyTime = now
+        undoStack.append(snapshot ?? marks)
         redoStack = []
         updateHistoryButtons()
     }
 
+    private func resetHistory() {
+        undoStack = []
+        redoStack = []
+        historyKey = nil
+        selectedMark = nil
+        updateHistoryButtons()
+    }
+
+    private func addMark(_ mark: Mark) {
+        pushHistory()
+        marks.append(mark)
+        updateHistoryButtons()
+    }
+
     private func undo() {
-        guard let last = marks.popLast() else { return }
-        redoStack.append(last)
+        if textField != nil { cancelText() }
+        guard let previous = undoStack.popLast() else { return }
+        redoStack.append(marks)
+        marks = previous
+        selectedMark = nil
+        historyKey = nil
         updateHistoryButtons()
         needsDisplay = true
     }
 
     private func redo() {
-        guard let mark = redoStack.popLast() else { return }
-        marks.append(mark)
+        guard let next = redoStack.popLast() else { return }
+        undoStack.append(marks)
+        marks = next
+        selectedMark = nil
+        historyKey = nil
         updateHistoryButtons()
         needsDisplay = true
     }
 
     private func updateHistoryButtons() {
-        undoButton.isEnabled = !marks.isEmpty
+        undoButton.isEnabled = !undoStack.isEmpty
         redoButton.isEnabled = !redoStack.isEmpty
     }
 
@@ -808,21 +1069,32 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         lineWidth = width
         UserDefaults.standard.set(Double(width), forKey: Self.lineWidthKey)
         if !fromSlider { thickness.value = width }
+        if let i = selectedMark, marks.indices.contains(i) {
+            pushHistory(key: "espessura-\(i)")
+            var mark = marks[i]
+            mark.width = width
+            if mark.tool == .blur, let crop = blurCrop(mark) {
+                mark.blur = crop.image
+                mark.blurFrame = crop.frame
+            }
+            marks[i] = mark
+        }
         if var mark = current {
             mark.width = width
             if mark.tool == .blur { mark.blur = blurredScreen(for: width) }
             current = mark
         }
         if let field = textField {
+            textWidth = width
             field.font = Mark.font(for: width)
             fitTextField(field)
         }
         needsDisplay = true
     }
 
-    /// Com uma ferramenta escolhida, a roda do mouse engrossa (para cima) ou afina (para baixo) o traço.
+    /// Com uma ferramenta ou marcação escolhida, a roda do mouse engrossa (para cima) ou afina (para baixo) o traço.
     override func scrollWheel(with event: NSEvent) {
-        guard mode == .screenshot, editing, tool != nil else { return super.scrollWheel(with: event) }
+        guard mode == .screenshot, editing, tool != nil || selectedMark != nil else { return super.scrollWheel(with: event) }
         // Sentido físico da roda, ignorando a "rolagem natural".
         let dy = event.isDirectionInvertedFromDevice ? -event.scrollingDeltaY : event.scrollingDeltaY
         var steps: CGFloat = 0
@@ -931,6 +1203,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     func setForTesting(selection: CGRect, marks: [Mark], tool: Tool? = nil, lineWidth: CGFloat? = nil, hint: CGPoint? = nil) {
         self.selection = selection
         self.marks = marks
+        resetHistory()
         if let lineWidth { self.lineWidth = lineWidth; thickness.value = lineWidth }
         widthHint = hint
         updateHistoryButtons()

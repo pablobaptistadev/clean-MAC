@@ -25,6 +25,9 @@ Responder sempre em português (PT-BR), direto ao ponto.
 - `CaptureOverlay.swift` — seletor (mover/redimensionar), marcações (`Mark`: lápis, linha, seta, quadrado, círculo, texto e desfoque, cada uma
   com a sua espessura `width`; o desfoque guarda só o recorte borrado, `CIGaussianBlur`), Shift restringe ângulos e proporção, cor, espessura (`ThicknessControl` e roda do mouse), desfazer/refazer, nova captura, copiar e salvar PNG.
 - `SettingsWindow.swift` — janela para gravar o atalho.
+- `MarkEditing.swift` — editar marcações prontas: `frame`, `handles`, `contains` (clique), `moved`, `resized`
+  (texto: cantos mudam a letra) e os cursores de redimensionar. O histórico do `CaptureView` guarda fotos de `marks`
+  (`undoStack`/`redoStack`); mudanças seguidas com a mesma chave (roda, cor, setas) viram um passo só.
 - `ScreenRecorder.swift` — gravação de vídeo (`SCStream` → `AVAssetWriter`): HEVC em MP4, até 1080p, 30 fps,
   só quadros `.complete` (tela parada não gera quadro) e `endSession` estica o último até o fim. Exclui as janelas do próprio app.
 - `Recording.swift` — gravação em andamento: contorno da área, cronômetro (`RecordingHUD`), ícone de parar na barra de menus,
@@ -32,4 +35,4 @@ Responder sempre em português (PT-BR), direto ao ponto.
 
 ## Feito
 Atalho configurável · seletor de área com tamanho em pixels · seta, lápis, quadrado, círculo, texto, cor · copiar · salvar PNG ·
-gravar vídeo HEVC leve da área ou da tela inteira (0.2.0) · espessura com barra e roda do mouse, refazer e nova captura (0.3.0) · linha reta e desfoque (0.4.0).
+gravar vídeo HEVC leve da área ou da tela inteira (0.2.0) · espessura com barra e roda do mouse, refazer e nova captura (0.3.0) · linha reta e desfoque (0.4.0) · mover, redimensionar, editar e apagar marcações; mãozinha para mover (0.5.0).

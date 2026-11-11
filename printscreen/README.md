@@ -15,7 +15,11 @@ Captura de tela para macOS no estilo do Lightshot: aperte o atalho, escolha a á
   define a intensidade.
 - **Espessura:** na barra lateral, entre a bolinha grande e a pequena. Com uma ferramenta escolhida, a roda do mouse
   também muda: para cima engrossa, para baixo afina (no texto, muda o tamanho da letra). Fica lembrada para as próximas.
-- **Desfazer / refazer:** ⌘Z e ⇧⌘Z, ou os botões da barra.
+- **Mexer no que já desenhou:** clique numa marcação (a mãozinha aparece em cima dela) e arraste para mover.
+  As alças azuis mudam o tamanho; no texto, os cantos aumentam ou diminuem a letra. Clique duplo no texto edita.
+  Com ela selecionada, a cor, a espessura e a roda do mouse mudam só ela; Delete apaga e as setas do teclado
+  empurram (Shift: de 10 em 10). Esc tira a seleção.
+- **Desfazer / refazer:** ⌘Z e ⇧⌘Z, ou os botões da barra. Volta também o que foi movido, redimensionado ou apagado.
 - **Nova captura:** botão ⊞ da barra (⌘N) fecha esta e fotografa a tela de novo, como ela está agora.
 - **Terminar:** copiar (⌘C) ou salvar em PNG (⌘S). Esc cancela.
 
