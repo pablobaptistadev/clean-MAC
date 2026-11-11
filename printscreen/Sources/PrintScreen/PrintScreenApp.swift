@@ -107,6 +107,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 guard !shots.isEmpty else { return }
                 let controller = CaptureController(shots: shots, mode: mode,
                                                    onRecord: { screen, rect in self.startRecording(screen: screen, rect: rect) },
+                                                   onNewCapture: {
+                                                       // Espera as janelas do seletor sumirem para elas não saírem na foto nova.
+                                                       DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { self.startCapture(mode: mode) }
+                                                   },
                                                    onClose: { self.capture = nil })
                 capture = controller
                 controller.show()

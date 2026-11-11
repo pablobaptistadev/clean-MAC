@@ -5,7 +5,11 @@ Captura de tela para macOS no estilo do Lightshot: aperte o atalho, escolha a á
 ## Como usar
 - **Atalho:** ⇧⌘2 (padrão). Troque em ícone da barra de menus › Atalho…
 - **Escolher a área:** arraste. Depois dá para mover a área e puxar as alças para mudar o tamanho. O tamanho em pixels aparece em cima.
-- **Marcar:** lápis, seta, quadrado, círculo e texto, com a cor que quiser (paleta ou "Mais cores…"). ⌘Z desfaz.
+- **Marcar:** lápis, seta, quadrado, círculo e texto, com a cor que quiser (paleta ou "Mais cores…").
+- **Espessura:** na barra lateral, entre a bolinha grande e a pequena. Com uma ferramenta escolhida, a roda do mouse
+  também muda: para cima engrossa, para baixo afina (no texto, muda o tamanho da letra). Fica lembrada para as próximas.
+- **Desfazer / refazer:** ⌘Z e ⇧⌘Z, ou os botões da barra.
+- **Nova captura:** botão ⊞ da barra (⌘N) fecha esta e fotografa a tela de novo, como ela está agora.
 - **Terminar:** copiar (⌘C) ou salvar em PNG (⌘S). Esc cancela.
 
 Funciona em todas as telas conectadas e captura na resolução real (Retina).

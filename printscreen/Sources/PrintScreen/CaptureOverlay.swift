@@ -33,9 +33,12 @@ struct Mark {
     var points: [CGPoint]
     let color: NSColor
     var text = ""
+    /// Espessura do traço em pontos. No texto, define o tamanho da letra.
+    var width: CGFloat = Mark.defaultWidth
 
-    static let lineWidth: CGFloat = 3
-    static let font = NSFont.systemFont(ofSize: 22, weight: .semibold)
+    static let defaultWidth: CGFloat = 3
+    static let widthRange: ClosedRange<CGFloat> = 1...20
+    static func font(for width: CGFloat) -> NSFont { .systemFont(ofSize: 16 + 2 * width, weight: .semibold) }
 
     private var box: CGRect {
         guard let a = points.first, let b = points.last else { return .zero }
@@ -57,7 +60,7 @@ struct Mark {
         case .arrow:
             guard let a = points.first, let b = points.last, a != b else { return }
             let angle = atan2(b.y - a.y, b.x - a.x)
-            let head: CGFloat = 16
+            let head = max(12, width * 3 + 7)
             let left = CGPoint(x: b.x - head * cos(angle - .pi / 7), y: b.y - head * sin(angle - .pi / 7))
             let right = CGPoint(x: b.x - head * cos(angle + .pi / 7), y: b.y - head * sin(angle + .pi / 7))
             let shaft = NSBezierPath()
@@ -76,12 +79,12 @@ struct Mark {
             stroke(NSBezierPath(ovalIn: box))
         case .text:
             guard let origin = points.first else { return }
-            (text as NSString).draw(at: origin, withAttributes: [.font: Mark.font, .foregroundColor: color])
+            (text as NSString).draw(at: origin, withAttributes: [.font: Mark.font(for: width), .foregroundColor: color])
         }
     }
 
     private func stroke(_ path: NSBezierPath) {
-        path.lineWidth = Mark.lineWidth
+        path.lineWidth = width
         path.lineCapStyle = .round
         path.lineJoinStyle = .round
         path.stroke()
@@ -102,10 +105,13 @@ final class CaptureController {
     private var windows: [OverlayWindow] = []
     private let onClose: () -> Void
     private let onRecord: (NSScreen, CGRect?) -> Void
+    private let onNewCapture: () -> Void
 
-    init(shots: [ScreenShot], mode: CaptureMode, onRecord: @escaping (NSScreen, CGRect?) -> Void, onClose: @escaping () -> Void) {
+    init(shots: [ScreenShot], mode: CaptureMode, onRecord: @escaping (NSScreen, CGRect?) -> Void,
+         onNewCapture: @escaping () -> Void, onClose: @escaping () -> Void) {
         self.onClose = onClose
         self.onRecord = onRecord
+        self.onNewCapture = onNewCapture
         for shot in shots {
             let window = OverlayWindow(screen: shot.screen)
             let view = CaptureView(shot: shot, mode: mode, controller: self)
@@ -138,6 +144,12 @@ final class CaptureController {
         for window in windows { window.orderOut(nil) }
         windows = []
         onClose()
+    }
+
+    /// Fecha esta captura e tira outra da tela como ela está agora.
+    func newCapture() {
+        close()
+        onNewCapture()
     }
 
     /// Fecha o seletor e grava a área (ou a tela inteira, se `rect` for nil).
@@ -192,7 +204,12 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     private var tool: Tool?
     private var color: NSColor = .systemRed
     private(set) var marks: [Mark] = []
+    private var redoStack: [Mark] = []
     private var current: Mark?
+    private var lineWidth = CaptureView.savedLineWidth()
+    private var scrollAccumulator: CGFloat = 0
+    private var widthHint: CGPoint?
+    private var hideHint: DispatchWorkItem?
     private var textField: NSTextField?
     private var textOrigin: CGPoint = .zero
 
@@ -200,6 +217,17 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     private let actionBar = ToolbarView()
     private var toolButtons: [Tool: ToolButton] = [:]
     private let colorButton = ToolButton(symbol: nil, help: "Cor")
+    private let thickness = ThicknessControl()
+    private let undoButton = ToolButton(symbol: "arrow.uturn.backward", help: "Desfazer (⌘Z)")
+    private let redoButton = ToolButton(symbol: "arrow.uturn.forward", help: "Refazer (⇧⌘Z)")
+
+    private static let lineWidthKey = "lineWidth"
+
+    static func savedLineWidth() -> CGFloat {
+        let saved = CGFloat(UserDefaults.standard.double(forKey: lineWidthKey))
+        guard saved > 0 else { return Mark.defaultWidth }
+        return min(max(saved, Mark.widthRange.lowerBound), Mark.widthRange.upperBound)
+    }
 
     init(shot: ScreenShot, mode: CaptureMode = .screenshot, controller: CaptureController?) {
         self.shot = shot
@@ -229,12 +257,20 @@ final class CaptureView: NSView, NSTextFieldDelegate {
             toolButtons[t] = button
             toolBar.add(button)
         }
+        toolBar.add(ToolbarSeparator())
         colorButton.onClick = { [weak self] in self?.showPalette() }
         toolBar.add(colorButton)
-        let undo = ToolButton(symbol: "arrow.uturn.backward", help: "Desfazer (⌘Z)")
-        undo.onClick = { [weak self] in self?.undo() }
-        toolBar.add(undo)
+        thickness.value = lineWidth
+        thickness.onChange = { [weak self] in self?.setLineWidth($0, fromSlider: true) }
+        toolBar.add(thickness)
+        toolBar.add(ToolbarSeparator())
+        undoButton.onClick = { [weak self] in self?.undo() }
+        redoButton.onClick = { [weak self] in self?.redo() }
+        let newCapture = ToolButton(symbol: "plus.viewfinder", help: "Nova captura (⌘N)")
+        newCapture.onClick = { [weak self] in self?.controller?.newCapture() }
+        for button in [undoButton, redoButton, newCapture] { toolBar.add(button) }
         toolBar.vertical = true
+        updateHistoryButtons()
 
         let copy = ToolButton(symbol: "doc.on.doc", help: "Copiar (⌘C)")
         copy.onClick = { [weak self] in self?.copyToClipboard() }
@@ -383,6 +419,25 @@ final class CaptureView: NSView, NSTextFieldDelegate {
             }
         }
         drawSizeLabel(sel)
+        if let widthHint { drawWidthHint(at: widthHint) }
+    }
+
+    /// Bolinha do tamanho do traço junto do cursor, enquanto a roda do mouse muda a espessura.
+    private func drawWidthHint(at p: CGPoint) {
+        let d = max(lineWidth, 2)
+        let dot = NSBezierPath(ovalIn: CGRect(x: p.x - d / 2, y: p.y - d / 2, width: d, height: d))
+        color.setFill()
+        dot.fill()
+        dot.lineWidth = 1
+        NSColor.white.withAlphaComponent(0.9).setStroke()
+        dot.stroke()
+        let label = tool == .text ? "Texto \(Int(Mark.font(for: lineWidth).pointSize)) pt" : "\(Int(lineWidth)) px"
+        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold), .foregroundColor: NSColor.white]
+        let size = (label as NSString).size(withAttributes: attrs)
+        let box = CGRect(x: p.x + d / 2 + 8, y: p.y - size.height / 2 - 3, width: size.width + 12, height: size.height + 6)
+        NSColor.black.withAlphaComponent(0.7).setFill()
+        NSBezierPath(roundedRect: box, xRadius: 5, yRadius: 5).fill()
+        (label as NSString).draw(at: CGPoint(x: box.minX + 6, y: box.minY + 3), withAttributes: attrs)
     }
 
     private func drawHint() {
@@ -430,7 +485,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
                 if tool == .text {
                     beginText(at: p)
                 } else {
-                    current = Mark(tool: tool, points: [p, p], color: color)
+                    current = Mark(tool: tool, points: [p, p], color: color, width: lineWidth)
                     drag = .draw
                 }
                 return
@@ -443,6 +498,8 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         // Começa uma área nova (as marcações da anterior são descartadas).
         controller?.selectionStarted(in: self)
         marks = []
+        redoStack = []
+        updateHistoryButtons()
         editing = false
         selection = CGRect(origin: p, size: .zero)
         drag = .select(start: p)
@@ -483,7 +540,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
                 selection = nil
             }
         case .draw:
-            if let current { marks.append(current) }
+            if let current { addMark(current) }
             current = nil
         default:
             break
@@ -517,6 +574,8 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         selection = nil
         editing = false
         marks = []
+        redoStack = []
+        updateHistoryButtons()
         layoutToolbars()
         needsDisplay = true
     }
@@ -524,8 +583,9 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     // MARK: Texto
 
     private func beginText(at p: CGPoint) {
-        let field = NSTextField(frame: CGRect(x: p.x, y: p.y, width: 260, height: 30))
-        field.font = Mark.font
+        let font = Mark.font(for: lineWidth)
+        let field = NSTextField(frame: CGRect(x: p.x, y: p.y, width: 260, height: ceil(font.pointSize * 1.4)))
+        field.font = font
         field.textColor = color
         field.isBordered = false
         field.drawsBackground = false
@@ -546,15 +606,19 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     }
 
     func controlTextDidChange(_ obj: Notification) {
-        guard let field = textField else { return }
-        let width = (field.stringValue as NSString).size(withAttributes: [.font: Mark.font]).width
-        field.frame.size.width = max(260, width + 30)
+        if let field = textField { fitTextField(field) }
+    }
+
+    private func fitTextField(_ field: NSTextField) {
+        let font = field.font ?? Mark.font(for: lineWidth)
+        let width = (field.stringValue as NSString).size(withAttributes: [.font: font]).width
+        field.frame.size = CGSize(width: max(260, width + 30), height: ceil(font.pointSize * 1.4))
     }
 
     private func commitText() {
         guard let field = textField else { return }
         let text = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !text.isEmpty { marks.append(Mark(tool: .text, points: [textOrigin], color: field.textColor ?? color, text: text)) }
+        if !text.isEmpty { addMark(Mark(tool: .text, points: [textOrigin], color: field.textColor ?? color, text: text, width: lineWidth)) }
         field.removeFromSuperview()
         textField = nil
         needsDisplay = true
@@ -582,7 +646,10 @@ final class CaptureView: NSView, NSTextFieldDelegate {
             switch event.charactersIgnoringModifiers?.lowercased() {
             case "c" where mode == .screenshot: copyToClipboard(); return
             case "s" where mode == .screenshot: saveAsPNG(); return
-            case "z": undo(); return
+            case "z":
+                if flags.contains(.shift) { redo() } else { undo() }
+                return
+            case "n" where mode == .screenshot: controller?.newCapture(); return
             case "r": startRecording(); return
             default: break
             }
@@ -602,9 +669,80 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         return false
     }
 
+    // MARK: Desfazer / refazer
+
+    private func addMark(_ mark: Mark) {
+        marks.append(mark)
+        redoStack = []
+        updateHistoryButtons()
+    }
+
     private func undo() {
-        guard !marks.isEmpty else { return }
-        marks.removeLast()
+        guard let last = marks.popLast() else { return }
+        redoStack.append(last)
+        updateHistoryButtons()
+        needsDisplay = true
+    }
+
+    private func redo() {
+        guard let mark = redoStack.popLast() else { return }
+        marks.append(mark)
+        updateHistoryButtons()
+        needsDisplay = true
+    }
+
+    private func updateHistoryButtons() {
+        undoButton.isEnabled = !marks.isEmpty
+        redoButton.isEnabled = !redoStack.isEmpty
+    }
+
+    // MARK: Espessura (barra e roda do mouse)
+
+    private func setLineWidth(_ value: CGFloat, fromSlider: Bool = false) {
+        let width = min(max(value.rounded(), Mark.widthRange.lowerBound), Mark.widthRange.upperBound)
+        guard width != lineWidth else { return }
+        lineWidth = width
+        UserDefaults.standard.set(Double(width), forKey: Self.lineWidthKey)
+        if !fromSlider { thickness.value = width }
+        if var mark = current {
+            mark.width = width
+            current = mark
+        }
+        if let field = textField {
+            field.font = Mark.font(for: width)
+            fitTextField(field)
+        }
+        needsDisplay = true
+    }
+
+    /// Com uma ferramenta escolhida, a roda do mouse engrossa (para cima) ou afina (para baixo) o traço.
+    override func scrollWheel(with event: NSEvent) {
+        guard mode == .screenshot, editing, tool != nil else { return super.scrollWheel(with: event) }
+        // Sentido físico da roda, ignorando a "rolagem natural".
+        let dy = event.isDirectionInvertedFromDevice ? -event.scrollingDeltaY : event.scrollingDeltaY
+        var steps: CGFloat = 0
+        if event.hasPreciseScrollingDeltas {
+            // Trackpad e Magic Mouse mandam muitos passos pequenos: um ponto de espessura a cada 8.
+            scrollAccumulator += dy
+            steps = (scrollAccumulator / 8).rounded(.towardZero)
+            scrollAccumulator -= steps * 8
+        } else if dy != 0 {
+            steps = dy > 0 ? 1 : -1
+        }
+        guard steps != 0 else { return }
+        setLineWidth(lineWidth + steps)
+        showWidthHint(at: convert(event.locationInWindow, from: nil))
+    }
+
+    private func showWidthHint(at p: CGPoint) {
+        widthHint = p
+        hideHint?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.widthHint = nil
+            self?.needsDisplay = true
+        }
+        hideHint = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9, execute: work)
         needsDisplay = true
     }
 
@@ -685,9 +823,12 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     }
 
     // Usado pelos testes de renderização.
-    func setForTesting(selection: CGRect, marks: [Mark], tool: Tool? = nil) {
+    func setForTesting(selection: CGRect, marks: [Mark], tool: Tool? = nil, lineWidth: CGFloat? = nil, hint: CGPoint? = nil) {
         self.selection = selection
         self.marks = marks
+        if let lineWidth { self.lineWidth = lineWidth; thickness.value = lineWidth }
+        widthHint = hint
+        updateHistoryButtons()
         self.editing = true
         self.tool = tool
         for (k, b) in toolButtons { b.isActive = k == tool }
@@ -733,6 +874,86 @@ final class ToolbarView: NSVisualEffectView {
     override var fittingSize: NSSize { stack.fittingSize }
 }
 
+/// Espessura do traço: barra vertical (em cima = mais grosso), entre uma bolinha grande e uma pequena.
+final class ThicknessControl: NSView {
+    var onChange: ((CGFloat) -> Void)?
+    var value: CGFloat {
+        get { CGFloat(slider.doubleValue) }
+        set {
+            slider.doubleValue = Double(newValue)
+            updateHelp()
+        }
+    }
+
+    private let slider = NSSlider(value: Double(Mark.defaultWidth), minValue: Double(Mark.widthRange.lowerBound),
+                                  maxValue: Double(Mark.widthRange.upperBound), target: nil, action: nil)
+
+    init() {
+        super.init(frame: CGRect(x: 0, y: 0, width: 32, height: 120))
+        translatesAutoresizingMaskIntoConstraints = false
+        slider.isVertical = true
+        slider.controlSize = .small
+        slider.trackFillColor = .systemBlue
+        slider.isContinuous = true
+        slider.target = self
+        slider.action = #selector(changed)
+        slider.translatesAutoresizingMaskIntoConstraints = false
+        let big = Self.dot(10), small = Self.dot(4)
+        for view in [big, slider, small] { addSubview(view) }
+        NSLayoutConstraint.activate([
+            widthAnchor.constraint(equalToConstant: 32),
+            heightAnchor.constraint(equalToConstant: 120),
+            big.centerXAnchor.constraint(equalTo: centerXAnchor),
+            big.topAnchor.constraint(equalTo: topAnchor, constant: 6),
+            slider.centerXAnchor.constraint(equalTo: centerXAnchor),
+            slider.topAnchor.constraint(equalTo: big.bottomAnchor, constant: 4),
+            slider.bottomAnchor.constraint(equalTo: small.topAnchor, constant: -4),
+            small.centerXAnchor.constraint(equalTo: centerXAnchor),
+            small.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6)
+        ])
+        updateHelp()
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) não é usado") }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    @objc private func changed() {
+        updateHelp()
+        onChange?(value)
+    }
+
+    private func updateHelp() {
+        toolTip = "Espessura: \(Int(value.rounded())) px · com uma ferramenta escolhida, a roda do mouse também muda"
+    }
+
+    private static func dot(_ size: CGFloat) -> NSView {
+        let view = NSImageView(image: NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
+            NSColor.white.setFill()
+            NSBezierPath(ovalIn: rect).fill()
+            return true
+        })
+        view.translatesAutoresizingMaskIntoConstraints = false
+        return view
+    }
+}
+
+/// Linha fina entre os grupos da barra.
+final class ToolbarSeparator: NSView {
+    init() {
+        super.init(frame: CGRect(x: 0, y: 0, width: 24, height: 1))
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.white.withAlphaComponent(0.18).cgColor
+        translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            widthAnchor.constraint(equalToConstant: 24),
+            heightAnchor.constraint(equalToConstant: 1)
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) não é usado") }
+}
+
 /// Botão principal com texto (azul do sistema), como o "Gravar" do modo vídeo.
 final class LabelButton: NSButton {
     var onClick: (() -> Void)?
@@ -773,6 +994,10 @@ final class ToolButton: NSButton {
     var onClick: (() -> Void)?
     var isActive = false {
         didSet { layer?.backgroundColor = isActive ? NSColor.systemBlue.cgColor : NSColor.clear.cgColor }
+    }
+
+    override var isEnabled: Bool {
+        didSet { alphaValue = isEnabled ? 1 : 0.35 }
     }
 
     init(symbol: String?, help: String) {
