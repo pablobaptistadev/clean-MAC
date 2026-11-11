@@ -22,8 +22,8 @@ Responder sempre em português (PT-BR), direto ao ponto.
 - `PrintScreenApp.swift` — entrada, ícone e menu na barra de menus.
 - `HotKey.swift` — atalho global e o formato salvo (`Shortcut`).
 - `ScreenCapture.swift` — captura das telas e pedido de permissão de Gravação de Tela.
-- `CaptureOverlay.swift` — seletor (mover/redimensionar), marcações (`Mark`: lápis, seta, quadrado, círculo, texto, cada uma com a
-  sua espessura `width`), cor, espessura (`ThicknessControl` e roda do mouse), desfazer/refazer, nova captura, copiar e salvar PNG.
+- `CaptureOverlay.swift` — seletor (mover/redimensionar), marcações (`Mark`: lápis, linha, seta, quadrado, círculo, texto e desfoque, cada uma
+  com a sua espessura `width`; o desfoque guarda só o recorte borrado, `CIGaussianBlur`), Shift restringe ângulos e proporção, cor, espessura (`ThicknessControl` e roda do mouse), desfazer/refazer, nova captura, copiar e salvar PNG.
 - `SettingsWindow.swift` — janela para gravar o atalho.
 - `ScreenRecorder.swift` — gravação de vídeo (`SCStream` → `AVAssetWriter`): HEVC em MP4, até 1080p, 30 fps,
   só quadros `.complete` (tela parada não gera quadro) e `endSession` estica o último até o fim. Exclui as janelas do próprio app.
@@ -32,4 +32,4 @@ Responder sempre em português (PT-BR), direto ao ponto.
 
 ## Feito
 Atalho configurável · seletor de área com tamanho em pixels · seta, lápis, quadrado, círculo, texto, cor · copiar · salvar PNG ·
-gravar vídeo HEVC leve da área ou da tela inteira (0.2.0) · espessura com barra e roda do mouse, refazer e nova captura (0.3.0).
+gravar vídeo HEVC leve da área ou da tela inteira (0.2.0) · espessura com barra e roda do mouse, refazer e nova captura (0.3.0) · linha reta e desfoque (0.4.0).

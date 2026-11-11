@@ -1,28 +1,33 @@
 import AppKit
+import CoreImage
 import UniformTypeIdentifiers
 
-// MARK: - Marcações (seta, lápis, quadrado, círculo, texto)
+// MARK: - Marcações (lápis, linha, seta, quadrado, círculo, texto, desfoque)
 
 enum Tool: String, CaseIterable {
-    case pencil, arrow, rect, ellipse, text
+    case pencil, line, arrow, rect, ellipse, text, blur
 
     var symbol: String {
         switch self {
         case .pencil: return "pencil"
+        case .line: return "line.diagonal"
         case .arrow: return "arrow.up.right"
         case .rect: return "rectangle"
         case .ellipse: return "circle"
         case .text: return "textformat"
+        case .blur: return "drop"
         }
     }
 
     var help: String {
         switch self {
         case .pencil: return "Lápis"
-        case .arrow: return "Seta"
-        case .rect: return "Quadrado"
-        case .ellipse: return "Círculo"
+        case .line: return "Linha (Shift: retas a cada 45°)"
+        case .arrow: return "Seta (Shift: retas a cada 45°)"
+        case .rect: return "Quadrado (Shift: quadrado perfeito)"
+        case .ellipse: return "Círculo (Shift: círculo perfeito)"
         case .text: return "Texto"
+        case .blur: return "Desfocar área (a espessura define a intensidade)"
         }
     }
 }
@@ -33,14 +38,19 @@ struct Mark {
     var points: [CGPoint]
     let color: NSColor
     var text = ""
-    /// Espessura do traço em pontos. No texto, define o tamanho da letra.
+    /// Espessura do traço em pontos. No texto, define o tamanho da letra; no desfoque, a intensidade.
     var width: CGFloat = Mark.defaultWidth
+    /// Desfoque: imagem já desfocada e onde ela é desenhada (a tela toda enquanto arrasta, só a área depois).
+    var blur: NSImage?
+    var blurFrame: CGRect = .zero
 
     static let defaultWidth: CGFloat = 3
     static let widthRange: ClosedRange<CGFloat> = 1...20
     static func font(for width: CGFloat) -> NSFont { .systemFont(ofSize: 16 + 2 * width, weight: .semibold) }
+    /// Raio do desfoque em pontos: forte o bastante para apagar texto já na espessura padrão.
+    static func blurRadius(for width: CGFloat) -> CGFloat { 4 + width * 2 }
 
-    private var box: CGRect {
+    var box: CGRect {
         guard let a = points.first, let b = points.last else { return .zero }
         return CGRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(a.x - b.x), height: abs(a.y - b.y))
     }
@@ -56,6 +66,12 @@ struct Mark {
             path.move(to: first)
             for p in points.dropFirst() { path.line(to: p) }
             if points.count == 1 { path.line(to: CGPoint(x: first.x + 0.1, y: first.y)) }
+            stroke(path)
+        case .line:
+            guard let a = points.first, let b = points.last else { return }
+            let path = NSBezierPath()
+            path.move(to: a)
+            path.line(to: a == b ? CGPoint(x: b.x + 0.1, y: b.y) : b)
             stroke(path)
         case .arrow:
             guard let a = points.first, let b = points.last, a != b else { return }
@@ -80,6 +96,29 @@ struct Mark {
         case .text:
             guard let origin = points.first else { return }
             (text as NSString).draw(at: origin, withAttributes: [.font: Mark.font(for: width), .foregroundColor: color])
+        case .blur:
+            guard let blur, box.width >= 1, box.height >= 1 else { return }
+            NSGraphicsContext.saveGraphicsState()
+            NSBezierPath(rect: box).addClip()
+            blur.draw(in: blurFrame, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+            NSGraphicsContext.restoreGraphicsState()
+        }
+    }
+
+    /// Com Shift: linha e seta em ângulos de 45°, quadrado e círculo perfeitos.
+    static func constrained(_ tool: Tool, from a: CGPoint, to p: CGPoint) -> CGPoint {
+        let dx = p.x - a.x, dy = p.y - a.y
+        switch tool {
+        case .line, .arrow:
+            let step = CGFloat.pi / 4
+            let angle = (atan2(dy, dx) / step).rounded() * step
+            let length = hypot(dx, dy)
+            return CGPoint(x: a.x + length * cos(angle), y: a.y + length * sin(angle))
+        case .rect, .ellipse, .blur:
+            let side = max(abs(dx), abs(dy))
+            return CGPoint(x: a.x + (dx < 0 ? -side : side), y: a.y + (dy < 0 ? -side : side))
+        default:
+            return p
         }
     }
 
@@ -210,6 +249,9 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     private var scrollAccumulator: CGFloat = 0
     private var widthHint: CGPoint?
     private var hideHint: DispatchWorkItem?
+    /// Captura inteira já desfocada na intensidade atual (uma por vez, para não pesar na memória).
+    private var blurCache: (width: CGFloat, cg: CGImage, image: NSImage)?
+    private static let ciContext = CIContext(options: [.cacheIntermediates: false])
     private var textField: NSTextField?
     private var textOrigin: CGPoint = .zero
 
@@ -399,6 +441,13 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         NSBezierPath(rect: sel).setClip()
         for mark in marks { mark.draw() }
         current?.draw()
+        if let current, current.tool == .blur {
+            let outline = NSBezierPath(rect: current.box)
+            outline.lineWidth = 1
+            outline.setLineDash([4, 3], count: 2, phase: 0)
+            NSColor.white.withAlphaComponent(0.8).setStroke()
+            outline.stroke()
+        }
         NSGraphicsContext.restoreGraphicsState()
 
         let border = NSBezierPath(rect: sel.insetBy(dx: -0.5, dy: -0.5))
@@ -431,7 +480,12 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         dot.lineWidth = 1
         NSColor.white.withAlphaComponent(0.9).setStroke()
         dot.stroke()
-        let label = tool == .text ? "Texto \(Int(Mark.font(for: lineWidth).pointSize)) pt" : "\(Int(lineWidth)) px"
+        let label: String
+        switch tool {
+        case .text: label = "Texto \(Int(Mark.font(for: lineWidth).pointSize)) pt"
+        case .blur: label = "Desfoque \(Int(lineWidth))"
+        default: label = "\(Int(lineWidth)) px"
+        }
         let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold), .foregroundColor: NSColor.white]
         let size = (label as NSString).size(withAttributes: attrs)
         let box = CGRect(x: p.x + d / 2 + 8, y: p.y - size.height / 2 - 3, width: size.width + 12, height: size.height + 6)
@@ -485,7 +539,12 @@ final class CaptureView: NSView, NSTextFieldDelegate {
                 if tool == .text {
                     beginText(at: p)
                 } else {
-                    current = Mark(tool: tool, points: [p, p], color: color, width: lineWidth)
+                    var mark = Mark(tool: tool, points: [p, p], color: color, width: lineWidth)
+                    if tool == .blur {
+                        mark.blur = blurredScreen(for: lineWidth)
+                        mark.blurFrame = bounds
+                    }
+                    current = mark
                     drag = .draw
                 }
                 return
@@ -523,7 +582,11 @@ final class CaptureView: NSView, NSTextFieldDelegate {
             layoutToolbars()
         case .draw:
             guard var mark = current else { return }
-            if mark.tool == .pencil { mark.points.append(p) } else { mark.points[1] = p }
+            if mark.tool == .pencil {
+                mark.points.append(p)
+            } else {
+                mark.points[1] = event.modifierFlags.contains(.shift) ? clamp(Mark.constrained(mark.tool, from: mark.points[0], to: p)) : p
+            }
             current = mark
         case .none:
             return
@@ -540,7 +603,13 @@ final class CaptureView: NSView, NSTextFieldDelegate {
                 selection = nil
             }
         case .draw:
-            if let current { addMark(current) }
+            if var mark = current {
+                if mark.tool == .blur {
+                    if let crop = blurCrop(mark) { mark.blur = crop.image; mark.blurFrame = crop.frame; addMark(mark) }
+                } else {
+                    addMark(mark)
+                }
+            }
             current = nil
         default:
             break
@@ -669,6 +738,41 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         return false
     }
 
+    // MARK: Desfoque
+
+    /// A captura inteira desfocada (na resolução real), para a prévia enquanto arrasta.
+    private func blurredScreen(for width: CGFloat) -> NSImage? {
+        if let blurCache, blurCache.width == width { return blurCache.image }
+        guard let cg = blurredCG(for: width) else { return nil }
+        let image = NSImage(cgImage: cg, size: bounds.size)
+        blurCache = (width, cg, image)
+        return image
+    }
+
+    private func blurredCG(for width: CGFloat) -> CGImage? {
+        if let blurCache, blurCache.width == width { return blurCache.cg }
+        let scale = CGFloat(shot.image.width) / bounds.width
+        let input = CIImage(cgImage: shot.image)
+        guard let filter = CIFilter(name: "CIGaussianBlur") else { return nil }
+        filter.setValue(input.clampedToExtent(), forKey: kCIInputImageKey)
+        filter.setValue(Mark.blurRadius(for: width) * scale, forKey: kCIInputRadiusKey)
+        guard let output = filter.outputImage?.cropped(to: input.extent),
+              let cg = Self.ciContext.createCGImage(output, from: input.extent) else { return nil }
+        return cg
+    }
+
+    /// Ao soltar, a marcação guarda só o pedaço desfocado da área (leve), alinhado aos pixels.
+    private func blurCrop(_ mark: Mark) -> (image: NSImage, frame: CGRect)? {
+        guard let full = blurredCG(for: mark.width) else { return nil }
+        let scale = CGFloat(full.width) / bounds.width
+        let box = mark.box
+        let pixels = CGRect(x: box.minX * scale, y: box.minY * scale, width: box.width * scale, height: box.height * scale)
+            .integral.intersection(CGRect(x: 0, y: 0, width: full.width, height: full.height))
+        guard pixels.width >= 2, pixels.height >= 2, let crop = full.cropping(to: pixels) else { return nil }
+        let frame = CGRect(x: pixels.minX / scale, y: pixels.minY / scale, width: pixels.width / scale, height: pixels.height / scale)
+        return (NSImage(cgImage: crop, size: frame.size), frame)
+    }
+
     // MARK: Desfazer / refazer
 
     private func addMark(_ mark: Mark) {
@@ -706,6 +810,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         if !fromSlider { thickness.value = width }
         if var mark = current {
             mark.width = width
+            if mark.tool == .blur { mark.blur = blurredScreen(for: width) }
             current = mark
         }
         if let field = textField {
