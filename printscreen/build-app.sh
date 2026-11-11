@@ -67,5 +67,6 @@ ditto "$STAGE" "$TARGET"
 rm -rf "$(dirname "$STAGE")"
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$TARGET" 2>/dev/null || true
 
-open "$TARGET"
+# --background: abre sem tirar print (abrir pelo Finder, Spotlight ou teclado já captura).
+open "$TARGET" --args --background
 echo "✓ PrintScreen $VERSION ($BUILD) instalado em $TARGET"

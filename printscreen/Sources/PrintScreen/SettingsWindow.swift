@@ -7,10 +7,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let window: NSWindow
     private let recorder = NSButton(title: "", target: nil, action: nil)
     private let message = NSTextField(labelWithString: "")
+    private let special = NSTextField(wrappingLabelWithString: "")
     private var monitor: Any?
 
     override init() {
-        window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 420, height: 190),
+        window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 420, height: 240),
                           styleMask: [.titled, .closable], backing: .buffered, defer: false)
         super.init()
         window.title = "PrintScreen"
@@ -34,10 +35,12 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         reset.bezelStyle = .rounded
         message.font = .systemFont(ofSize: 12)
         message.textColor = .systemOrange
+        special.font = .systemFont(ofSize: 11)
+        special.textColor = .tertiaryLabelColor
 
         let row = NSStackView(views: [recorder, reset])
         row.spacing = 10
-        let stack = NSStackView(views: [title, hint, row, message])
+        let stack = NSStackView(views: [title, hint, row, message, special])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 12
@@ -50,6 +53,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             stack.trailingAnchor.constraint(equalTo: content.trailingAnchor),
             stack.topAnchor.constraint(equalTo: content.topAnchor),
             hint.widthAnchor.constraint(equalToConstant: 372),
+            special.widthAnchor.constraint(equalToConstant: 372),
             recorder.widthAnchor.constraint(greaterThanOrEqualToConstant: 150)
         ])
         window.contentView = content
@@ -66,6 +70,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     private func refresh() {
         recorder.title = Shortcut.load().display
+        special.stringValue = """
+            Teclas especiais (como a de print dos teclados Logitech) não chegam aqui. No Logi Options+, ponha na tecla \
+            Atalho de teclado \(Shortcut.load().display) ou Abrir aplicativo › PrintScreen: as duas tiram o print.
+            """
     }
 
     @objc private func record() {

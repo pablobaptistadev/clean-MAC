@@ -1,4 +1,5 @@
 import AppKit
+import CoreServices
 
 // MARK: - App: ícone na barra de menus + atalho global
 
@@ -37,14 +38,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         item.menu = menu
         statusItem = item
 
-        // Durante uma gravação, o mesmo atalho para e salva o vídeo.
-        HotKey.shared.onPress = { [weak self] in
-            guard let self else { return }
-            if let recording = self.recording { recording.stop() } else { self.startCapture() }
-        }
+        HotKey.shared.onPress = { [weak self] in self?.shortcutPressed() }
         if !HotKey.shared.register(Shortcut.load()) {
             showSettings()
         }
+        // Abrir o PrintScreen (Finder, Spotlight ou uma tecla do teclado que "abre aplicativo") já tira o print.
+        if Self.openedByUser(notification) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.shortcutPressed() }
+        }
+    }
+
+    /// Abrir de novo com o app já rodando (ex.: Logi Options+ › Abrir aplicativo) também tira o print.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        shortcutPressed()
+        return false
+    }
+
+    /// Atalho, tecla do teclado ou reabrir: captura; durante uma gravação, para e salva o vídeo.
+    private func shortcutPressed() {
+        if let recording { recording.stop() } else { startCapture() }
+    }
+
+    /// Aberto pela pessoa. Não conta: início de sessão, reabertura automática do macOS e o script de instalação (--background).
+    static func openedByUser(_ notification: Notification) -> Bool {
+        if CommandLine.arguments.contains("--background") { return false }
+        if let isDefault = notification.userInfo?[NSApplication.launchIsDefaultUserInfoKey] as? Bool, !isDefault { return false }
+        if let event = NSAppleEventManager.shared().currentAppleEvent,
+           event.eventID == AEEventID(kAEOpenApplication),
+           event.paramDescriptor(forKeyword: AEKeyword(keyAEPropData))?.enumCodeValue == OSType(keyAELaunchedAsLogInItem) {
+            return false
+        }
+        return true
     }
 
     // O menu é montado na hora de abrir, para mostrar o atalho atual.

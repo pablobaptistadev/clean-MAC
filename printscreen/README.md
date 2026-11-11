@@ -4,6 +4,10 @@ Captura de tela para macOS no estilo do Lightshot: aperte o atalho, escolha a á
 
 ## Como usar
 - **Atalho:** ⇧⌘2 (padrão). Troque em ícone da barra de menus › Atalho…
+- **Abrir o app tira o print:** abrir o PrintScreen pelo Finder, Spotlight ou por uma tecla que "abre aplicativo"
+  já captura, esteja ele fechado ou aberto.
+- **Tecla de print do teclado (Logitech MX Keys e outros):** essas teclas especiais não aparecem na janela do atalho.
+  No Logi Options+, ponha na tecla **Atalho de teclado ⇧⌘2** ou **Abrir aplicativo › PrintScreen**.
 - **Escolher a área:** arraste. Depois dá para mover a área e puxar as alças para mudar o tamanho. O tamanho em pixels aparece em cima.
 - **Marcar:** lápis, linha, seta, quadrado, círculo e texto, com a cor que quiser (paleta ou "Mais cores…").
   Segurando Shift, linha e seta ficam em ângulos de 45° e quadrado e círculo saem perfeitos.
