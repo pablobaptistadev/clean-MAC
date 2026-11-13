@@ -120,6 +120,10 @@ final class RecordingController: NSObject {
         pasteboard.writeObjects([url as NSURL])
         NSSound(named: "Pop")?.play()
         NSWorkspace.shared.activateFileViewerSelecting([url])
+        if let visible = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame {
+            Toast.show("Vídeo salvo e copiado", detail: "Cole com ⌘V ou veja em Filmes › PrintScreen",
+                       at: CGPoint(x: visible.midX, y: visible.minY + 120), seconds: 2.2)
+        }
     }
 
     // MARK: Ajudantes

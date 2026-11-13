@@ -34,6 +34,7 @@ Responder sempre em português (PT-BR), direto ao ponto.
   ferramentas à esquerda e o `CaptureView` no modo `.stage` dentro de um `NSScrollView`). As capturas são marcações
   `Tool.image` (camadas), então mover, redimensionar, desfazer e o resto valem para elas. `CaptureHost` é o protocolo
   entre o `CaptureView` e quem o mostra (seletor ou palco).
+- `Toast.swift` — aviso rápido de sucesso (vidro escuro, ícone verde) ao copiar, salvar e terminar um vídeo.
 - `ScreenRecorder.swift` — gravação de vídeo (`SCStream` → `AVAssetWriter`): HEVC em MP4, até 1080p, 30 fps,
   só quadros `.complete` (tela parada não gera quadro) e `endSession` estica o último até o fim. Exclui as janelas do próprio app.
 - `Recording.swift` — gravação em andamento: contorno da área, cronômetro (`RecordingHUD`), ícone de parar na barra de menus,

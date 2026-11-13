@@ -1372,11 +1372,25 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         pasteboard.setData(result.png, forType: .png)
         if let tiff = result.image.tiffRepresentation { pasteboard.setData(tiff, forType: .tiff) }
         NSSound(named: "Pop")?.play()
+        let point = toastPoint()
         if mode == .stage { host?.exported() } else { host?.close() }
+        Toast.show("Copiado", detail: "Cole com ⌘V onde quiser", at: point)
+    }
+
+    /// Onde mostrar o aviso: no meio da área escolhida (seletor) ou no alto do palco.
+    private func toastPoint() -> CGPoint {
+        guard let window else { return NSEvent.mouseLocation }
+        if mode == .stage, let scroll = enclosingScrollView {
+            let r = window.convertToScreen(scroll.convert(scroll.bounds, to: nil))
+            return CGPoint(x: r.midX, y: r.maxY - 70)
+        }
+        let r = window.convertToScreen(convert(selection ?? bounds, to: nil))
+        return CGPoint(x: r.midX, y: r.midY)
     }
 
     private func saveAsPNG() {
         guard let result = renderImage() else { return }
+        let point = toastPoint()
         if mode != .stage { host?.close() }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.png]
@@ -1390,6 +1404,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         do {
             try result.png.write(to: url)
             host?.exported()
+            Toast.show("Imagem salva", detail: url.lastPathComponent, at: point)
         } catch {
             let alert = NSAlert()
             alert.messageText = "Não foi possível salvar"
