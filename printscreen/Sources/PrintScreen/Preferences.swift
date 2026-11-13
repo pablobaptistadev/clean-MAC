@@ -18,6 +18,18 @@ enum Preferences {
         set { defaults.set(newValue, forKey: "rememberSelection") }
     }
 
+    /// Tecla que, segurada, faz o arrastar mover a área.
+    static var moveModifier: MoveModifier {
+        get { defaults.string(forKey: "moveModifier").flatMap(MoveModifier.init(rawValue:)) ?? .option }
+        set { defaults.set(newValue.rawValue, forKey: "moveModifier") }
+    }
+
+    /// Formato da área (livre, widescreen, quadrada): vale também para a próxima captura.
+    static var selectionFormat: SelectionFormat {
+        get { defaults.string(forKey: "selectionFormat").flatMap(SelectionFormat.init(rawValue:)) ?? .free }
+        set { defaults.set(newValue.rawValue, forKey: "selectionFormat") }
+    }
+
     /// Última área escolhida, em pontos da tela onde foi feita (origem em cima).
     static func lastSelection() -> (display: UInt32, rect: CGRect)? {
         guard let saved = defaults.dictionary(forKey: "lastSelection"),

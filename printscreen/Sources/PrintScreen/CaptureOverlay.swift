@@ -365,6 +365,12 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     private var textWidth = Mark.defaultWidth
     /// Texto existente aberto com duplo clique (volta para o lugar se cancelar).
     private var textEditing: (index: Int, original: Mark)?
+    /// Modo mãozinha (botão ✋ ou tecla M): arrastar em qualquer lugar move a área, mesmo com uma ferramenta escolhida.
+    private(set) var moveMode = false
+    /// Tecla que, segurada, também faz o arrastar mover a área (Ajustes).
+    private let moveKey = Preferences.moveModifier
+    /// Livre, widescreen ou quadrada: com proporção, a área nova e as alças mantêm o formato.
+    private(set) var format = Preferences.selectionFormat
 
     let toolBar = ToolbarView()
     let actionBar = ToolbarView()
@@ -374,6 +380,11 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     private let idleCancel = LabelButton(symbol: "xmark", title: "Cancelar", help: "Cancelar a captura (Esc)", style: .secondary)
     private let undoButton = ToolButton(symbol: "arrow.uturn.backward", help: "Desfazer (⌘Z)")
     private let redoButton = ToolButton(symbol: "arrow.uturn.forward", help: "Refazer (⇧⌘Z)")
+    private lazy var moveButton = ToolButton(symbol: "hand.raised",
+                                             help: "Mover a área (M) · ou segure \(moveKey.symbol) e arraste, sem largar a ferramenta")
+    private var formatButtons: [SelectionFormat: ChipButton] = [:]
+    private let fullScreenButton = ChipButton(title: "Tela inteira", icon: AreaIcon.fullScreen,
+                                              help: "Palco do tamanho da tela inteira (proporção livre)")
 
     private static let lineWidthKey = "lineWidth"
 
@@ -430,15 +441,33 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     override func mouseMoved(with event: NSEvent) { updateCursor(at: convert(event.locationInWindow, from: nil)) }
     override func cursorUpdate(with event: NSEvent) { updateCursor(at: convert(event.locationInWindow, from: nil)) }
 
-    private func updateCursor(at p: CGPoint) {
+    private func updateCursor(at p: CGPoint, modifiers: NSEvent.ModifierFlags = NSEvent.modifierFlags) {
         guard case .none = drag else { return }
-        cursor(at: p).set()
+        cursor(at: p, modifiers: modifiers).set()
+    }
+
+    /// A tecla de mover (⌥, ⌘ ou ⌃, nos Ajustes) está segurada?
+    private func moveKeyHeld(_ modifiers: NSEvent.ModifierFlags) -> Bool {
+        modifiers.intersection(.deviceIndependentFlagsMask).contains(moveKey.flag)
+    }
+
+    /// Arrastar agora move a área inteira (modo mãozinha ou tecla segurada)?
+    private func movesArea(_ modifiers: NSEvent.ModifierFlags) -> Bool {
+        mode != .stage && editing && selection != nil && (moveMode || moveKeyHeld(modifiers))
+    }
+
+    // Segurar ou soltar a tecla de mover troca o cursor na hora, sem precisar mexer o mouse.
+    override func flagsChanged(with event: NSEvent) {
+        super.flagsChanged(with: event)
+        guard let window else { return }
+        updateCursor(at: convert(window.mouseLocationOutsideOfEventStream, from: nil), modifiers: event.modifierFlags)
     }
 
     /// Mãozinha onde dá para mover (marcações e a área), setas nas alças, cruz para desenhar ou escolher outra área.
-    func cursor(at p: CGPoint) -> NSCursor {
+    func cursor(at p: CGPoint, modifiers: NSEvent.ModifierFlags = NSEvent.modifierFlags) -> NSCursor {
         for bar in [toolBar, actionBar] where !bar.isHidden && bar.frame.contains(p) { return .arrow }
         if let field = textField, field.frame.contains(p) { return .iBeam }
+        if movesArea(modifiers) { return .openHand }
         guard editing, let sel = selection else { return .crosshair }
         if mode.allowsMarks, let i = selectedMark, marks.indices.contains(i),
            let handle = marks[i].handles.first(where: { hypot($0.point.x - p.x, $0.point.y - p.y) <= 8 }) {
@@ -499,6 +528,32 @@ final class CaptureView: NSView, NSTextFieldDelegate {
                                 style: .secondary)
         close.onClick = { [weak self] in self?.closeCapture() }
         idleCancel.onClick = { [weak self] in self?.closeCapture() }
+        moveButton.onClick = { [weak self] in
+            guard let self else { return }
+            self.setMoveMode(!self.moveMode)
+        }
+        // Palcos prontos: Widescreen e Quadrada no meio da tela, ou a tela inteira (o escolhido fica azul).
+        if mode != .stage {
+            let title = NSTextField(labelWithString: "Palco")
+            title.font = .systemFont(ofSize: 12, weight: .semibold)
+            title.textColor = NSColor.white.withAlphaComponent(0.55)
+            actionBar.add(ToolbarSpacer(width: 6))
+            actionBar.add(title, spacingAfter: 6)
+            for f in [SelectionFormat.widescreen, .square] {
+                let chip = ChipButton(title: f.title, icon: f.icon, help: f.help)
+                // Clicar no que já está azul solta a proporção (área livre).
+                chip.onClick = { [weak self] in
+                    guard let self else { return }
+                    self.chooseFormat(self.format == f ? .free : f)
+                }
+                formatButtons[f] = chip
+                actionBar.add(chip)
+            }
+            fullScreenButton.onClick = { [weak self] in self?.chooseFullScreen() }
+            actionBar.add(fullScreenButton)
+            actionBar.add(ToolbarSeparator(vertical: true))
+            updateFormatButtons()
+        }
         switch mode {
         case .video:
             let start = LabelButton(symbol: "record.circle.fill", title: "Gravar", help: "Gravar vídeo da área (Enter)")
@@ -514,7 +569,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
             actionBar.add(add)
             actionBar.add(close)
         case .screenshot:
-            for b in [copy, save, share, record, close] { actionBar.add(b) }
+            for b in [moveButton, copy, save, share, record, close] { actionBar.add(b) }
         case .stage:
             for b in [copy, save, share] { actionBar.add(b) }
         }
@@ -538,8 +593,58 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     private func choose(_ t: Tool) {
         commitText()
         selectMark(nil)
-        tool = tool == t ? nil : t
+        // Saindo do modo mãozinha, a ferramenta clicada fica escolhida (não desliga).
+        if moveMode {
+            moveMode = false
+            moveButton.isActive = false
+            tool = t
+        } else {
+            tool = tool == t ? nil : t
+        }
         for (k, b) in toolButtons { b.isActive = k == tool }
+    }
+
+    /// Liga ou desliga o modo mãozinha. A ferramenta fica guardada e volta ao desligar.
+    func setMoveMode(_ on: Bool) {
+        guard mode != .stage else { return }
+        commitText()
+        moveMode = on
+        moveButton.isActive = on
+        if on { selectMark(nil) }
+        for (k, b) in toolButtons { b.isActive = !on && k == tool }
+        if let window { updateCursor(at: convert(window.mouseLocationOutsideOfEventStream, from: nil)) }
+        needsDisplay = true
+    }
+
+    /// Troca o palco. Widescreen e Quadrada já põem a área pronta no meio da tela (1920 × 1080, 1080 × 1080);
+    /// depois, a área nova e as alças mantêm a proporção. Livre só solta a proporção, sem mexer na área.
+    func chooseFormat(_ f: SelectionFormat) {
+        format = f
+        Preferences.selectionFormat = f
+        if mode != .stage, let preset = f.centered(in: bounds, scale: pixelScale) { placeArea(preset) }
+        layoutToolbars()
+        needsDisplay = true
+    }
+
+    /// Palco do tamanho da tela inteira, com proporção livre.
+    func chooseFullScreen() {
+        guard mode != .stage else { return }
+        format = .free
+        Preferences.selectionFormat = .free
+        placeArea(bounds)
+        layoutToolbars()
+        needsDisplay = true
+    }
+
+    private func placeArea(_ r: CGRect) {
+        selection = r
+        editing = true
+        if mode == .screenshot || mode == .addToStage { Preferences.saveSelection(r, on: shot.screen) }
+    }
+
+    private func updateFormatButtons() {
+        for (k, b) in formatButtons { b.isActive = k == format }
+        fullScreenButton.isActive = format == .free && selection == bounds
     }
 
     private func updateColorButton() {
@@ -607,6 +712,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
 
     private func layoutToolbars() {
         guard mode != .stage else { return }
+        updateFormatButtons()
         idleCancel.isHidden = selection != nil
         guard editing, let sel = selection else {
             toolBar.isHidden = true
@@ -757,7 +863,8 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         case .addToStage: hint = "Arraste para escolher a área a adicionar ao palco · Enter adiciona a tela inteira · Esc volta"
         default: hint = "Arraste para escolher a área · ⌘R grava vídeo · Esc cancela"
         }
-        let text = hint as NSString
+        let formatNote = format.ratioLabel.map { "Palco \(format.title) (\($0)) · " } ?? ""
+        let text = (formatNote + hint) as NSString
         let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 15, weight: .medium), .foregroundColor: NSColor.white]
         let size = text.size(withAttributes: attrs)
         let box = CGRect(x: bounds.midX - size.width / 2 - 16, y: bounds.midY - size.height / 2 - 10, width: size.width + 32, height: size.height + 20)
@@ -768,7 +875,9 @@ final class CaptureView: NSView, NSTextFieldDelegate {
 
     private func drawSizeLabel(_ sel: CGRect) {
         let scale = pixelScale
-        let text = "\(Int((sel.width * scale).rounded())) × \(Int((sel.height * scale).rounded()))" as NSString
+        var label = "\(Int((sel.width * scale).rounded())) × \(Int((sel.height * scale).rounded()))"
+        if mode != .stage, let ratio = format.ratioLabel { label += "  ·  \(ratio)" }
+        let text = label as NSString
         let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold), .foregroundColor: NSColor.white]
         let size = text.size(withAttributes: attrs)
         var y = sel.minY - size.height - 12
@@ -791,6 +900,12 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         let p = convert(event.locationInWindow, from: nil)
         commitText()
         if editing, let sel = selection {
+            // 0) Modo mãozinha ou tecla de mover segurada: arrastar (de qualquer ponto) move a área.
+            if movesArea(event.modifierFlags) {
+                drag = .move(offset: CGPoint(x: p.x - sel.minX, y: p.y - sel.minY))
+                NSCursor.closedHand.set()
+                return
+            }
             // 1) Alças da marcação selecionada: muda o tamanho.
             if mode.allowsMarks, let i = selectedMark, marks.indices.contains(i),
                let handle = marks[i].handles.first(where: { hypot($0.point.x - p.x, $0.point.y - p.y) <= 8 }) {
@@ -858,7 +973,11 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         let p = clamp(raw)
         switch drag {
         case .select(let start):
-            selection = CGRect(x: min(start.x, p.x), y: min(start.y, p.y), width: abs(p.x - start.x), height: abs(p.y - start.y))
+            if let ratio = format.ratio {
+                selection = SelectionFormat.corner(from: start, to: p, ratio: ratio, in: bounds)
+            } else {
+                selection = CGRect(x: min(start.x, p.x), y: min(start.y, p.y), width: abs(p.x - start.x), height: abs(p.y - start.y))
+            }
         case .move(let offset):
             guard var sel = selection else { return }
             sel.origin = CGPoint(x: min(max(0, p.x - offset.x), bounds.width - sel.width),
@@ -868,6 +987,11 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         case .resize(let handle, let original):
             if mode == .stage {
                 resizeStage(original, handle: handle, to: raw)
+            } else if let ratio = format.ratio {
+                // Formato travado: a área cresce ou diminui sem perder a proporção.
+                let r = SelectionFormat.resize(original, handle: handle, to: p, ratio: ratio, in: bounds)
+                if r.width >= 4, r.height >= 4 { selection = r }
+                layoutToolbars()
             } else {
                 selection = resized(original, handle: handle, to: p)
                 layoutToolbars()
@@ -899,6 +1023,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         switch drag {
         case .select:
             if let sel = selection, sel.width >= 4, sel.height >= 4 {
+                selection = format.snap(sel, in: bounds, scale: pixelScale)
                 editing = true
                 areaChanged = true
             } else {
@@ -907,7 +1032,12 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         case .move:
             areaChanged = true
         case .resize:
-            if mode == .stage { normalizeStage() } else { areaChanged = true }
+            if mode == .stage {
+                normalizeStage()
+            } else {
+                if let sel = selection { selection = format.snap(sel, in: bounds, scale: pixelScale) }
+                areaChanged = true
+            }
         case .draw:
             if var mark = current {
                 if mark.tool == .blur {
@@ -1137,6 +1267,12 @@ final class CaptureView: NSView, NSTextFieldDelegate {
             case 126: nudgeSelectedMark(dx: 0, dy: -step); return
             default: break
             }
+        }
+        // M: liga e desliga o modo mãozinha (mover a área).
+        if mode == .screenshot, editing, selection != nil, flags.intersection([.command, .control, .option]).isEmpty,
+           event.charactersIgnoringModifiers?.lowercased() == "m" {
+            setMoveMode(!moveMode)
+            return
         }
         if event.keyCode == 36 || event.keyCode == 76 { // Enter / Enter do teclado numérico
             if mode == .video { startRecording(); return }
@@ -1634,7 +1770,10 @@ final class ToolbarView: NSVisualEffectView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) não é usado") }
 
-    func add(_ view: NSView) { stack.addArrangedSubview(view) }
+    func add(_ view: NSView, spacingAfter: CGFloat? = nil) {
+        stack.addArrangedSubview(view)
+        if let spacingAfter { stack.setCustomSpacing(spacingAfter, after: view) }
+    }
 
     override var fittingSize: NSSize { stack.fittingSize }
 }
@@ -1703,16 +1842,17 @@ final class ThicknessControl: NSView {
     }
 }
 
-/// Linha fina entre os grupos da barra.
+/// Linha fina entre os grupos da barra (deitada na barra em pé; em pé, com `vertical`, na barra deitada).
 final class ToolbarSeparator: NSView {
-    init() {
-        super.init(frame: CGRect(x: 0, y: 0, width: 24, height: 1))
+    init(vertical: Bool = false) {
+        let size = vertical ? CGSize(width: 1, height: 20) : CGSize(width: 24, height: 1)
+        super.init(frame: CGRect(origin: .zero, size: size))
         wantsLayer = true
         layer?.backgroundColor = NSColor.white.withAlphaComponent(0.18).cgColor
         translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            widthAnchor.constraint(equalToConstant: 24),
-            heightAnchor.constraint(equalToConstant: 1)
+            widthAnchor.constraint(equalToConstant: size.width),
+            heightAnchor.constraint(equalToConstant: size.height)
         ])
     }
 
@@ -1751,7 +1891,61 @@ final class LabelButton: NSButton {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) não é usado") }
 
+    // O fundo azul do botão escolhido fica do tamanho certo (sem as margens de alinhamento do AppKit).
+    override var alignmentRectInsets: NSEdgeInsets { NSEdgeInsetsZero }
+
     // Responde já no primeiro clique, mesmo com o PrintScreen em segundo plano (cronômetro da gravação).
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    @objc private func clicked() { onClick?() }
+}
+
+/// Espaço fixo dentro da barra.
+final class ToolbarSpacer: NSView {
+    init(width: CGFloat) {
+        super.init(frame: CGRect(x: 0, y: 0, width: width, height: 1))
+        translatesAutoresizingMaskIntoConstraints = false
+        widthAnchor.constraint(equalToConstant: width).isActive = true
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) não é usado") }
+}
+
+/// Botão de ícone e texto da barra (os palcos prontos): fica azul quando escolhido.
+final class ChipButton: NSButton {
+    var onClick: (() -> Void)?
+    var isActive = false {
+        didSet { layer?.backgroundColor = isActive ? NSColor.systemBlue.cgColor : NSColor.clear.cgColor }
+    }
+
+    init(title: String, icon: NSImage? = nil, help: String) {
+        super.init(frame: .zero)
+        attributedTitle = NSAttributedString(string: icon == nil ? title : " " + title, attributes: [
+            .font: NSFont.systemFont(ofSize: 12, weight: .semibold), .foregroundColor: NSColor.white
+        ])
+        if let icon {
+            image = icon
+            imagePosition = .imageLeading
+            imageHugsTitle = true
+            contentTintColor = .white
+        }
+        isBordered = false
+        toolTip = help
+        wantsLayer = true
+        layer?.cornerRadius = 7
+        target = self
+        action = #selector(clicked)
+        translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 32),
+            widthAnchor.constraint(equalToConstant: ceil(intrinsicContentSize.width) + 18)
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) não é usado") }
+
+    // O fundo azul cobre exatamente o botão (sem as margens de alinhamento do AppKit).
+    override var alignmentRectInsets: NSEdgeInsets { NSEdgeInsetsZero }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     @objc private func clicked() { onClick?() }
@@ -1789,6 +1983,9 @@ final class ToolButton: NSButton {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) não é usado") }
+
+    // O fundo azul do botão escolhido fica do tamanho certo (sem as margens de alinhamento do AppKit).
+    override var alignmentRectInsets: NSEdgeInsets { NSEdgeInsetsZero }
 
     // Responde já no primeiro clique, mesmo com o PrintScreen em segundo plano (cronômetro da gravação).
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }

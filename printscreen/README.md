@@ -9,6 +9,12 @@ Captura de tela para macOS no estilo do Lightshot: aperte o atalho, escolha a á
 - **Tecla de print do teclado (Logitech MX Keys e outros):** essas teclas especiais não aparecem na janela do atalho.
   No Logi Options+, ponha na tecla **Atalho de teclado ⇧⌘2** ou **Abrir aplicativo › PrintScreen**.
 - **Escolher a área:** arraste. Depois dá para mover a área e puxar as alças para mudar o tamanho. O tamanho em pixels aparece em cima.
+- **Mover a área com uma ferramenta escolhida (ex.: a seta):** segure **⌥ Option** e arraste, de qualquer ponto da
+  tela (a mãozinha aparece). A tecla pode ser ⌥, ⌘ ou ⌃ (Ajustes). Ou ligue o botão de **mãozinha** da barra de
+  baixo (ou a tecla **M**): enquanto estiver azul, arrastar só move a área; clicar numa ferramenta volta a desenhar.
+- **Palco pronto:** na barra de baixo, **Widescreen** (1920 × 1080, 16:9) e **Quadrada** (1080 × 1080) põem a área
+  no meio da tela; **Tela inteira** pega a tela toda. Com Widescreen ou Quadrada azul, a área nova e as alças mantêm
+  a proporção; clique de novo no botão azul para soltar. Fica lembrado para as próximas capturas e vale também no vídeo.
 - **Marcar:** lápis, linha, seta, quadrado, círculo e texto, com a cor que quiser (paleta ou "Mais cores…").
   Segurando Shift, linha e seta ficam em ângulos de 45° e quadrado e círculo saem perfeitos.
 - **Desfocar:** a gota borra a área que você arrastar, para esconder senhas, nomes e números. A espessura
@@ -25,6 +31,8 @@ Captura de tela para macOS no estilo do Lightshot: aperte o atalho, escolha a á
 
 ## Ajustes (ícone da barra de menus › Ajustes…)
 - **Ferramenta já escolhida:** a captura já abre com ela (ex.: Seta) — é só arrastar a área e desenhar.
+- **Palco da área:** Livre, Widescreen ou Quadrada (o mesmo dos botões da barra).
+- **Mover a área:** qual tecla segurar para arrastar a área sem largar a ferramenta (⌥ Option, ⌘ Command ou ⌃ Control).
 - **Começar com a última área escolhida:** ao apertar o atalho, a área da última captura já vem marcada; dá para
   copiar na hora (⌘C), desenhar ou ajustar. Clicar fora dela escolhe outra.
 
