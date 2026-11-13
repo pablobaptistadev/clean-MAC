@@ -35,8 +35,8 @@ extension Mark {
         case .line, .arrow:
             guard let a = points.first, let b = points.last else { return [] }
             return [MarkHandle(id: Mark.startHandle, point: a), MarkHandle(id: Mark.endHandle, point: b)]
-        case .text:
-            // Só os cantos: o texto cresce ou diminui por igual.
+        case .text, .image:
+            // Só os cantos: texto e imagem crescem ou diminuem por igual.
             let all = Mark.boxHandles(frame)
             return [0, 2, 4, 6].map { MarkHandle(id: $0, point: all[$0]) }
         default:
@@ -48,7 +48,7 @@ extension Mark {
     func contains(_ p: CGPoint) -> Bool {
         let tolerance = max(6, width / 2 + 4)
         switch tool {
-        case .text, .blur:
+        case .text, .blur, .image:
             return frame.insetBy(dx: -4, dy: -4).contains(p)
         case .line, .arrow:
             guard let a = points.first, let b = points.last else { return false }
@@ -71,6 +71,7 @@ extension Mark {
     func moved(by dx: CGFloat, _ dy: CGFloat) -> Mark {
         var mark = self
         mark.points = points.map { CGPoint(x: $0.x + dx, y: $0.y + dy) }
+        if mark.blur != nil { mark.blurFrame = blurFrame.offsetBy(dx: dx, dy: dy) }
         return mark
     }
 
@@ -83,6 +84,17 @@ extension Mark {
         case .rect, .ellipse, .blur:
             let r = Mark.resize(box, handle: handle, to: p)
             mark.points = [r.origin, CGPoint(x: r.maxX, y: r.maxY)]
+        case .image:
+            // O canto oposto fica parado e a imagem mantém a proporção.
+            let old = box
+            guard old.width > 0, old.height > 0 else { return mark }
+            let anchorLeft = handle == 2 || handle == 4
+            let anchorTop = handle == 4 || handle == 6
+            let anchor = CGPoint(x: anchorLeft ? old.minX : old.maxX, y: anchorTop ? old.minY : old.maxY)
+            let factor = max(abs(p.x - anchor.x) / old.width, abs(p.y - anchor.y) / old.height, 16 / min(old.width, old.height))
+            let w = old.width * factor, h = old.height * factor
+            let origin = CGPoint(x: anchorLeft ? anchor.x : anchor.x - w, y: anchorTop ? anchor.y : anchor.y - h)
+            mark.points = [origin, CGPoint(x: origin.x + w, y: origin.y + h)]
         case .pencil:
             let old = frame
             let r = Mark.resize(old, handle: handle, to: p)

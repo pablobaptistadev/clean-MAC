@@ -28,6 +28,12 @@ Responder sempre em português (PT-BR), direto ao ponto.
 - `MarkEditing.swift` — editar marcações prontas: `frame`, `handles`, `contains` (clique), `moved`, `resized`
   (texto: cantos mudam a letra) e os cursores de redimensionar. O histórico do `CaptureView` guarda fotos de `marks`
   (`undoStack`/`redoStack`); mudanças seguidas com a mesma chave (roda, cor, setas) viram um passo só.
+- `Preferences.swift` — ajustes: ferramenta inicial, começar com a última área (salva por tela em `lastSelection`).
+- `Sharing.swift` — compartilhar o PNG: extensão do Notas (`com.apple.Notes.SharingExtension`) e `.composeEmail` (Mail).
+- `Stage.swift` — palco: `StageItem` (captura indo para o palco) e `StageWindowController` (janela com barra de cima,
+  ferramentas à esquerda e o `CaptureView` no modo `.stage` dentro de um `NSScrollView`). As capturas são marcações
+  `Tool.image` (camadas), então mover, redimensionar, desfazer e o resto valem para elas. `CaptureHost` é o protocolo
+  entre o `CaptureView` e quem o mostra (seletor ou palco).
 - `ScreenRecorder.swift` — gravação de vídeo (`SCStream` → `AVAssetWriter`): HEVC em MP4, até 1080p, 30 fps,
   só quadros `.complete` (tela parada não gera quadro) e `endSession` estica o último até o fim. Exclui as janelas do próprio app.
 - `Recording.swift` — gravação em andamento: contorno da área, cronômetro (`RecordingHUD`), ícone de parar na barra de menus,
@@ -35,4 +41,4 @@ Responder sempre em português (PT-BR), direto ao ponto.
 
 ## Feito
 Atalho configurável · seletor de área com tamanho em pixels · seta, lápis, quadrado, círculo, texto, cor · copiar · salvar PNG ·
-gravar vídeo HEVC leve da área ou da tela inteira (0.2.0) · espessura com barra e roda do mouse, refazer e nova captura (0.3.0) · linha reta e desfoque (0.4.0) · mover, redimensionar, editar e apagar marcações; mãozinha para mover (0.5.0).
+gravar vídeo HEVC leve da área ou da tela inteira (0.2.0) · espessura com barra e roda do mouse, refazer e nova captura (0.3.0) · linha reta e desfoque (0.4.0) · mover, redimensionar, editar e apagar marcações; mãozinha para mover (0.5.0) · ajustes (ferramenta inicial, última área), Notas/e-mail e palco com camadas (0.6.0).

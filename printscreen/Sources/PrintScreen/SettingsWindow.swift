@@ -1,20 +1,23 @@
 import AppKit
 
-// MARK: - Janela do atalho: clica no botão e pressiona a combinação nova
+// MARK: - Ajustes: atalho (clica no botão e pressiona a combinação nova) e como a captura abre
 
 @MainActor
 final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let window: NSWindow
     private let recorder = NSButton(title: "", target: nil, action: nil)
-    private let message = NSTextField(labelWithString: "")
+    /// Aviso do atalho; some quando está vazio, para não deixar buraco na janela.
+    private let message = MessageLabel(labelWithString: "")
     private let special = NSTextField(wrappingLabelWithString: "")
+    private let toolPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let rememberBox = NSButton(checkboxWithTitle: "Começar com a última área escolhida", target: nil, action: nil)
     private var monitor: Any?
 
     override init() {
-        window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 420, height: 240),
+        window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 420, height: 420),
                           styleMask: [.titled, .closable], backing: .buffered, defer: false)
         super.init()
-        window.title = "PrintScreen"
+        window.title = "Ajustes do PrintScreen"
         window.isReleasedWhenClosed = false
         window.delegate = self
         build()
@@ -40,7 +43,33 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
         let row = NSStackView(views: [recorder, reset])
         row.spacing = 10
-        let stack = NSStackView(views: [title, hint, row, message, special])
+
+        // Como a captura abre
+        let openTitle = NSTextField(labelWithString: "Ao abrir a captura")
+        openTitle.font = .systemFont(ofSize: 15, weight: .semibold)
+        let toolLabel = NSTextField(labelWithString: "Ferramenta já escolhida:")
+        toolPopup.addItem(withTitle: "Nenhuma (escolho na hora)")
+        for tool in Tool.drawing {
+            toolPopup.addItem(withTitle: tool.name)
+            toolPopup.lastItem?.image = NSImage(systemSymbolName: tool.symbol, accessibilityDescription: nil)
+            toolPopup.lastItem?.representedObject = tool.rawValue
+        }
+        toolPopup.target = self
+        toolPopup.action = #selector(toolChanged)
+        let toolRow = NSStackView(views: [toolLabel, toolPopup])
+        toolRow.spacing = 8
+        rememberBox.target = self
+        rememberBox.action = #selector(rememberChanged)
+        let rememberHint = NSTextField(wrappingLabelWithString: "Ao apertar o atalho, a área da última captura já aparece marcada: dá para copiar na hora (⌘C), desenhar ou ajustar.")
+        rememberHint.font = .systemFont(ofSize: 11)
+        rememberHint.textColor = .secondaryLabelColor
+        let line = NSBox()
+        line.boxType = .separator
+
+        let stack = NSStackView(views: [title, hint, row, message, special, line, openTitle, toolRow, rememberBox, rememberHint])
+        stack.setCustomSpacing(18, after: special)
+        stack.setCustomSpacing(18, after: line)
+        stack.setCustomSpacing(4, after: rememberBox)
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 12
@@ -54,6 +83,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             stack.topAnchor.constraint(equalTo: content.topAnchor),
             hint.widthAnchor.constraint(equalToConstant: 372),
             special.widthAnchor.constraint(equalToConstant: 372),
+            rememberHint.widthAnchor.constraint(equalToConstant: 352),
+            line.widthAnchor.constraint(equalToConstant: 372),
             recorder.widthAnchor.constraint(greaterThanOrEqualToConstant: 150)
         ])
         window.contentView = content
@@ -68,8 +99,22 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         window.makeKeyAndOrderFront(nil)
     }
 
+    @objc private func toolChanged() {
+        Preferences.startTool = (toolPopup.selectedItem?.representedObject as? String).flatMap(Tool.init(rawValue:))
+    }
+
+    @objc private func rememberChanged() {
+        Preferences.rememberSelection = rememberBox.state == .on
+    }
+
     private func refresh() {
         recorder.title = Shortcut.load().display
+        if let tool = Preferences.startTool, let index = Tool.drawing.firstIndex(of: tool) {
+            toolPopup.selectItem(at: index + 1)
+        } else {
+            toolPopup.selectItem(at: 0)
+        }
+        rememberBox.state = Preferences.rememberSelection ? .on : .off
         special.stringValue = """
             Teclas especiais (como a de print dos teclados Logitech) não chegam aqui. No Logi Options+, ponha na tecla \
             Atalho de teclado \(Shortcut.load().display) ou Abrir aplicativo › PrintScreen: as duas tiram o print.
@@ -134,5 +179,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             stopRecording()
             HotKey.shared.register(Shortcut.load())
         }
+    }
+}
+
+final class MessageLabel: NSTextField {
+    override var stringValue: String {
+        didSet { isHidden = stringValue.isEmpty }
     }
 }

@@ -6,6 +6,24 @@ import UniformTypeIdentifiers
 
 enum Tool: String, CaseIterable {
     case pencil, line, arrow, rect, ellipse, text, blur
+    /// Camada de imagem do palco (não aparece na barra).
+    case image
+
+    /// Ferramentas da barra, na ordem.
+    static let drawing: [Tool] = [.pencil, .line, .arrow, .rect, .ellipse, .text, .blur]
+
+    var name: String {
+        switch self {
+        case .pencil: return "Lápis"
+        case .line: return "Linha"
+        case .arrow: return "Seta"
+        case .rect: return "Quadrado"
+        case .ellipse: return "Círculo"
+        case .text: return "Texto"
+        case .blur: return "Desfoque"
+        case .image: return "Imagem"
+        }
+    }
 
     var symbol: String {
         switch self {
@@ -16,6 +34,7 @@ enum Tool: String, CaseIterable {
         case .ellipse: return "circle"
         case .text: return "textformat"
         case .blur: return "drop"
+        case .image: return "photo"
         }
     }
 
@@ -28,6 +47,7 @@ enum Tool: String, CaseIterable {
         case .ellipse: return "Círculo (Shift: círculo perfeito)"
         case .text: return "Texto"
         case .blur: return "Desfocar área (a espessura define a intensidade)"
+        case .image: return "Imagem"
         }
     }
 }
@@ -43,6 +63,8 @@ struct Mark {
     /// Desfoque: imagem já desfocada e onde ela é desenhada (a tela toda enquanto arrasta, só a área depois).
     var blur: NSImage?
     var blurFrame: CGRect = .zero
+    /// Camada de imagem do palco, desenhada em `box`.
+    var image: NSImage?
 
     static let defaultWidth: CGFloat = 3
     static let widthRange: ClosedRange<CGFloat> = 1...20
@@ -106,6 +128,10 @@ struct Mark {
             NSBezierPath(rect: box).addClip()
             blur.draw(in: blurFrame, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
             NSGraphicsContext.restoreGraphicsState()
+        case .image:
+            guard let image, box.width >= 1, box.height >= 1 else { return }
+            image.draw(in: box, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true,
+                       hints: [.interpolation: NSNumber(value: NSImageInterpolation.high.rawValue)])
         }
     }
 
@@ -141,23 +167,57 @@ enum CaptureMode {
     case screenshot
     /// Escolher a área do vídeo (sem marcações).
     case video
+    /// Escolher mais uma captura para o palco.
+    case addToStage
+    /// O palco: várias capturas em camadas, numa janela própria.
+    case stage
+
+    var allowsMarks: Bool { self == .screenshot || self == .stage }
+}
+
+/// Quem mostra o `CaptureView`: o seletor de tela cheia ou a janela do palco.
+@MainActor
+protocol CaptureHost: AnyObject {
+    func close()
+    func record(screen: NSScreen, rect: CGRect?)
+    func selectionStarted(in view: CaptureView)
+    /// Seletor: a captura atual vai para o palco.
+    func sendToStage(from view: CaptureView)
+    /// Palco: pede mais uma captura.
+    func addCapture()
+    /// Palco: marcações ou tamanho mudaram.
+    func contentChanged()
+    /// Copiado, salvo ou compartilhado.
+    func exported()
+}
+
+extension CaptureHost {
+    func record(screen: NSScreen, rect: CGRect?) {}
+    func selectionStarted(in view: CaptureView) {}
+    func sendToStage(from view: CaptureView) {}
+    func addCapture() {}
+    func contentChanged() {}
+    func exported() {}
 }
 
 @MainActor
-final class CaptureController {
+final class CaptureController: CaptureHost {
     private var windows: [OverlayWindow] = []
+    private let mode: CaptureMode
     private let onClose: () -> Void
     private let onRecord: (NSScreen, CGRect?) -> Void
-    private let onNewCapture: () -> Void
+    private let onSendToStage: (StageItem, Bool) -> Void
 
+    /// `onSendToStage(item, capturarDeNovo)`: no modo normal, depois de mandar para o palco já começa outra captura.
     init(shots: [ScreenShot], mode: CaptureMode, onRecord: @escaping (NSScreen, CGRect?) -> Void,
-         onNewCapture: @escaping () -> Void, onClose: @escaping () -> Void) {
+         onSendToStage: @escaping (StageItem, Bool) -> Void, onClose: @escaping () -> Void) {
+        self.mode = mode
         self.onClose = onClose
         self.onRecord = onRecord
-        self.onNewCapture = onNewCapture
+        self.onSendToStage = onSendToStage
         for shot in shots {
             let window = OverlayWindow(screen: shot.screen)
-            let view = CaptureView(shot: shot, mode: mode, controller: self)
+            let view = CaptureView(shot: shot, mode: mode, host: self)
             window.contentView = view
             windows.append(window)
         }
@@ -168,7 +228,13 @@ final class CaptureController {
         for window in windows { window.orderFrontRegardless() }
         // A tela onde está o mouse recebe o teclado (Esc, ⌘C, ⌘S…).
         let mouse = NSEvent.mouseLocation
-        let main = windows.first { $0.frame.contains(mouse) } ?? windows.first
+        var main = windows.first { $0.frame.contains(mouse) } ?? windows.first
+        // Ajuste "começar com a última área": ela volta marcada na tela onde foi feita.
+        if mode == .screenshot || mode == .addToStage, Preferences.rememberSelection, let last = Preferences.lastSelection(),
+           let window = windows.first(where: { ($0.contentView as? CaptureView).flatMap { Preferences.displayID(of: $0.captureScreen) } == last.display }),
+           let view = window.contentView as? CaptureView, view.restoreSelection(last.rect) {
+            main = window
+        }
         main?.makeKey()
         main?.makeFirstResponder(main?.contentView)
         NSCursor.crosshair.set()
@@ -190,10 +256,13 @@ final class CaptureController {
         onClose()
     }
 
-    /// Fecha esta captura e tira outra da tela como ela está agora.
-    func newCapture() {
+    func sendToStage(from view: CaptureView) {
+        guard let item = view.stageItem() else {
+            NSSound.beep()
+            return
+        }
         close()
-        onNewCapture()
+        onSendToStage(item, mode == .screenshot)
     }
 
     /// Fecha o seletor e grava a área (ou a tela inteira, se `rect` for nil).
@@ -241,9 +310,14 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     ]
 
     private let shot: ScreenShot
-    private let mode: CaptureMode
+    let mode: CaptureMode
     private let image: NSImage
-    private weak var controller: CaptureController?
+    weak var host: CaptureHost?
+    /// Pixels por ponto do resultado (Retina = 2).
+    private(set) var pixelScale: CGFloat
+    /// Espaço em volta do palco, para as alças de tamanho.
+    static let stageMargin: CGFloat = 40
+    var captureScreen: NSScreen { shot.screen }
 
     private(set) var selection: CGRect?
     private var editing = false
@@ -266,7 +340,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     private var widthHint: CGPoint?
     private var hideHint: DispatchWorkItem?
     /// Captura inteira já desfocada na intensidade atual (uma por vez, para não pesar na memória).
-    private var blurCache: (width: CGFloat, cg: CGImage, image: NSImage)?
+    private var blurCache: (width: CGFloat, key: [CGRect], cg: CGImage, image: NSImage)?
     private static let ciContext = CIContext(options: [.cacheIntermediates: false])
     private var textField: NSTextField?
     private var textOrigin: CGPoint = .zero
@@ -274,8 +348,8 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     /// Texto existente aberto com duplo clique (volta para o lugar se cancelar).
     private var textEditing: (index: Int, original: Mark)?
 
-    private let toolBar = ToolbarView()
-    private let actionBar = ToolbarView()
+    let toolBar = ToolbarView()
+    let actionBar = ToolbarView()
     private var toolButtons: [Tool: ToolButton] = [:]
     private let colorButton = ToolButton(symbol: nil, help: "Cor")
     private let thickness = ThicknessControl()
@@ -290,13 +364,34 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         return min(max(saved, Mark.widthRange.lowerBound), Mark.widthRange.upperBound)
     }
 
-    init(shot: ScreenShot, mode: CaptureMode = .screenshot, controller: CaptureController?) {
+    init(shot: ScreenShot, mode: CaptureMode = .screenshot, host: CaptureHost?, size: CGSize? = nil, scale: CGFloat? = nil) {
+        let size = size ?? shot.screen.frame.size
         self.shot = shot
         self.mode = mode
-        self.image = NSImage(cgImage: shot.image, size: shot.screen.frame.size)
-        self.controller = controller
-        super.init(frame: CGRect(origin: .zero, size: shot.screen.frame.size))
+        self.image = NSImage(cgImage: shot.image, size: size)
+        self.host = host
+        self.pixelScale = scale ?? CGFloat(shot.image.width) / max(size.width, 1)
+        super.init(frame: CGRect(origin: .zero, size: size))
         buildToolbars()
+        // Ajuste "ferramenta já escolhida".
+        if mode.allowsMarks, let start = Preferences.startTool {
+            tool = start
+            for (k, b) in toolButtons { b.isActive = k == start }
+        }
+    }
+
+    /// O palco vazio, do tamanho `size` (em pontos).
+    static func makeStage(size: CGSize, scale: CGFloat) -> CaptureView {
+        let blank = CGContext(data: nil, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 0,
+                              space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!.makeImage()!
+        let shot = ScreenShot(screen: NSScreen.main ?? NSScreen.screens[0], image: blank)
+        let m = stageMargin
+        let view = CaptureView(shot: shot, mode: .stage, host: nil,
+                               size: CGSize(width: size.width + 2 * m, height: size.height + 2 * m), scale: scale)
+        view.selection = CGRect(x: m, y: m, width: size.width, height: size.height)
+        view.editing = true
+        return view
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) não é usado") }
@@ -326,17 +421,17 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         for bar in [toolBar, actionBar] where !bar.isHidden && bar.frame.contains(p) { return .arrow }
         if let field = textField, field.frame.contains(p) { return .iBeam }
         guard editing, let sel = selection else { return .crosshair }
-        if mode == .screenshot, let i = selectedMark, marks.indices.contains(i),
+        if mode.allowsMarks, let i = selectedMark, marks.indices.contains(i),
            let handle = marks[i].handles.first(where: { hypot($0.point.x - p.x, $0.point.y - p.y) <= 8 }) {
             return handle.id >= Mark.startHandle ? .crosshair : Cursors.resize(handle: handle.id)
         }
         if let index = handles(of: sel).firstIndex(where: { hypot($0.x - p.x, $0.y - p.y) <= 7 }) {
             return Cursors.resize(handle: index)
         }
-        if mode == .screenshot, markIndex(at: p) != nil { return .openHand }
-        guard sel.contains(p) else { return .crosshair }
+        if mode.allowsMarks, markIndex(at: p) != nil { return .openHand }
+        guard sel.contains(p) else { return mode == .stage ? .arrow : .crosshair }
         switch tool {
-        case nil: return .openHand
+        case nil: return mode == .stage ? .arrow : .openHand
         case .text?: return .iBeam
         default: return .crosshair
         }
@@ -345,7 +440,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     // MARK: Barras de ferramentas
 
     private func buildToolbars() {
-        for t in Tool.allCases {
+        for t in Tool.drawing {
             let button = ToolButton(symbol: t.symbol, help: t.help)
             button.onClick = { [weak self] in self?.choose(t) }
             toolButtons[t] = button
@@ -360,9 +455,13 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         toolBar.add(ToolbarSeparator())
         undoButton.onClick = { [weak self] in self?.undo() }
         redoButton.onClick = { [weak self] in self?.redo() }
-        let newCapture = ToolButton(symbol: "plus.viewfinder", help: "Nova captura (⌘N)")
-        newCapture.onClick = { [weak self] in self?.controller?.newCapture() }
-        for button in [undoButton, redoButton, newCapture] { toolBar.add(button) }
+        let addCapture = ToolButton(symbol: "plus.viewfinder",
+                                    help: mode == .stage ? "Adicionar captura ao palco" : "Adicionar outra captura (abre o palco, para juntar várias)")
+        addCapture.onClick = { [weak self] in
+            guard let self else { return }
+            if self.mode == .stage { self.host?.addCapture() } else { self.host?.sendToStage(from: self) }
+        }
+        for button in [undoButton, redoButton, addCapture] { toolBar.add(button) }
         toolBar.vertical = true
         updateHistoryButtons()
 
@@ -370,22 +469,41 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         copy.onClick = { [weak self] in self?.copyToClipboard() }
         let save = ToolButton(symbol: "square.and.arrow.down", help: "Salvar PNG (⌘S)")
         save.onClick = { [weak self] in self?.saveAsPNG() }
+        let share = ToolButton(symbol: "square.and.arrow.up", help: "Compartilhar: nota no Notas ou e-mail")
+        share.onClick = { [weak self, weak share] in
+            guard let self, let share else { return }
+            self.showShareMenu(from: share)
+        }
         let record = ToolButton(symbol: "record.circle", help: mode == .video ? "Gravar vídeo da área (Enter)" : "Gravar vídeo da área (⌘R)")
         record.onClick = { [weak self] in self?.startRecording() }
-        let close = ToolButton(symbol: "xmark", help: "Fechar (Esc)")
-        close.onClick = { [weak self] in self?.controller?.close() }
-        if mode == .video {
+        let close = ToolButton(symbol: "xmark", help: mode == .addToStage ? "Voltar ao palco (Esc)" : "Fechar (Esc)")
+        close.onClick = { [weak self] in self?.host?.close() }
+        switch mode {
+        case .video:
             let start = LabelButton(symbol: "record.circle.fill", title: "Gravar", help: "Gravar vídeo da área (Enter)")
             start.onClick = { [weak self] in self?.startRecording() }
             actionBar.add(start)
             actionBar.add(close)
-        } else {
-            for b in [copy, save, record, close] { actionBar.add(b) }
+        case .addToStage:
+            let add = LabelButton(symbol: "rectangle.stack.badge.plus", title: "Adicionar ao palco", help: "Adicionar esta área ao palco (Enter)")
+            add.onClick = { [weak self] in
+                guard let self else { return }
+                self.host?.sendToStage(from: self)
+            }
+            actionBar.add(add)
+            actionBar.add(close)
+        case .screenshot:
+            for b in [copy, save, share, record, close] { actionBar.add(b) }
+        case .stage:
+            for b in [copy, save, share] { actionBar.add(b) }
         }
 
-        for bar in [toolBar, actionBar] {
-            bar.isHidden = true
-            addSubview(bar)
+        // No palco as barras ficam na janela (o StageWindowController põe); no seletor, junto da área.
+        if mode != .stage {
+            for bar in [toolBar, actionBar] {
+                bar.isHidden = true
+                addSubview(bar)
+            }
         }
         updateColorButton()
     }
@@ -440,7 +558,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         color = picked
         updateColorButton()
         textField?.textColor = picked
-        if let i = selectedMark, marks.indices.contains(i), marks[i].tool != .blur {
+        if let i = selectedMark, marks.indices.contains(i), marks[i].tool != .blur, marks[i].tool != .image {
             pushHistory(key: "cor-\(i)")
             marks[i].color = picked
             needsDisplay = true
@@ -461,12 +579,13 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     }
 
     private func layoutToolbars() {
+        guard mode != .stage else { return }
         guard editing, let sel = selection else {
             toolBar.isHidden = true
             actionBar.isHidden = true
             return
         }
-        toolBar.isHidden = mode == .video
+        toolBar.isHidden = !mode.allowsMarks
         actionBar.isHidden = false
         let gap: CGFloat = 8
         let ts = toolBar.fittingSize
@@ -487,17 +606,25 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     // MARK: Desenho
 
     override func draw(_ dirtyRect: NSRect) {
-        image.draw(in: bounds, from: .zero, operation: .copy, fraction: 1, respectFlipped: true, hints: nil)
-        NSColor.black.withAlphaComponent(0.45).setFill()
-        guard let sel = selection else {
+        if mode == .stage {
+            NSColor(calibratedWhite: 0.11, alpha: 1).setFill()
             bounds.fill()
-            drawHint()
-            return
+            guard let sel = selection else { return }
+            drawCheckerboard(sel)
+        } else {
+            image.draw(in: bounds, from: .zero, operation: .copy, fraction: 1, respectFlipped: true, hints: nil)
+            NSColor.black.withAlphaComponent(0.45).setFill()
+            guard let sel = selection else {
+                bounds.fill()
+                drawHint()
+                return
+            }
+            let dim = NSBezierPath(rect: bounds)
+            dim.appendRect(sel)
+            dim.windingRule = .evenOdd
+            dim.fill()
         }
-        let dim = NSBezierPath(rect: bounds)
-        dim.appendRect(sel)
-        dim.windingRule = .evenOdd
-        dim.fill()
+        guard let sel = selection else { return }
 
         NSGraphicsContext.saveGraphicsState()
         NSBezierPath(rect: sel).setClip()
@@ -532,6 +659,24 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         }
         drawSizeLabel(sel)
         if let widthHint { drawWidthHint(at: widthHint) }
+    }
+
+    /// Fundo xadrez do palco: onde não tem imagem, o PNG sai transparente.
+    private func drawCheckerboard(_ rect: CGRect) {
+        let tile: CGFloat = 10
+        let pattern = NSImage(size: NSSize(width: tile * 2, height: tile * 2), flipped: false) { r in
+            NSColor(calibratedWhite: 0.24, alpha: 1).setFill()
+            r.fill()
+            NSColor(calibratedWhite: 0.30, alpha: 1).setFill()
+            CGRect(x: 0, y: 0, width: tile, height: tile).fill()
+            CGRect(x: tile, y: tile, width: tile, height: tile).fill()
+            return true
+        }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current?.patternPhase = rect.origin
+        NSColor(patternImage: pattern).setFill()
+        rect.fill()
+        NSGraphicsContext.restoreGraphicsState()
     }
 
     /// Contorno tracejado e alças redondas (azul do sistema) da marcação selecionada.
@@ -578,9 +723,13 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     }
 
     private func drawHint() {
-        let text = (mode == .video
-            ? "Arraste para escolher a área do vídeo · Enter grava a tela inteira · Esc cancela"
-            : "Arraste para escolher a área · ⌘R grava vídeo · Esc cancela") as NSString
+        let hint: String
+        switch mode {
+        case .video: hint = "Arraste para escolher a área do vídeo · Enter grava a tela inteira · Esc cancela"
+        case .addToStage: hint = "Arraste para escolher a área a adicionar ao palco · Enter adiciona a tela inteira · Esc volta"
+        default: hint = "Arraste para escolher a área · ⌘R grava vídeo · Esc cancela"
+        }
+        let text = hint as NSString
         let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 15, weight: .medium), .foregroundColor: NSColor.white]
         let size = text.size(withAttributes: attrs)
         let box = CGRect(x: bounds.midX - size.width / 2 - 16, y: bounds.midY - size.height / 2 - 10, width: size.width + 32, height: size.height + 20)
@@ -590,7 +739,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     }
 
     private func drawSizeLabel(_ sel: CGRect) {
-        let scale = CGFloat(shot.image.width) / bounds.width
+        let scale = pixelScale
         let text = "\(Int((sel.width * scale).rounded())) × \(Int((sel.height * scale).rounded()))" as NSString
         let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold), .foregroundColor: NSColor.white]
         let size = text.size(withAttributes: attrs)
@@ -615,18 +764,18 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         commitText()
         if editing, let sel = selection {
             // 1) Alças da marcação selecionada: muda o tamanho.
-            if mode == .screenshot, let i = selectedMark, marks.indices.contains(i),
+            if mode.allowsMarks, let i = selectedMark, marks.indices.contains(i),
                let handle = marks[i].handles.first(where: { hypot($0.point.x - p.x, $0.point.y - p.y) <= 8 }) {
                 beginMarkEdit()
                 drag = .resizeMark(index: i, handle: handle.id, original: marks[i])
                 return
             }
-            // 2) Alças da área.
+            // 2) Alças da área (no palco, mudam o tamanho do palco).
             if let index = handles(of: sel).firstIndex(where: { hypot($0.x - p.x, $0.y - p.y) <= 7 }) {
                 drag = .resize(handle: index, original: sel)
                 return
             }
-            if mode == .screenshot {
+            if mode.allowsMarks {
                 // 3) Clique numa marcação: seleciona e arrasta para mover. Duplo clique num texto edita.
                 if let i = markIndex(at: p) {
                     if event.clickCount >= 2, marks[i].tool == .text {
@@ -642,7 +791,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
                 selectMark(nil)
             }
             // 4) Desenhar com a ferramenta escolhida.
-            if mode == .screenshot, let tool, sel.contains(p) {
+            if mode.allowsMarks, let tool, sel.contains(p) {
                 if tool == .text {
                     beginText(at: p)
                 } else {
@@ -656,6 +805,8 @@ final class CaptureView: NSView, NSTextFieldDelegate {
                 }
                 return
             }
+            // No palco não há área para mover nem para escolher de novo.
+            if mode == .stage { return }
             // 5) Sem ferramenta: arrasta a área.
             if tool == nil, sel.contains(p) {
                 drag = .move(offset: CGPoint(x: p.x - sel.minX, y: p.y - sel.minY))
@@ -664,7 +815,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
             }
         }
         // Começa uma área nova (as marcações da anterior são descartadas).
-        controller?.selectionStarted(in: self)
+        host?.selectionStarted(in: self)
         marks = []
         resetHistory()
         editing = false
@@ -675,7 +826,8 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     }
 
     override func mouseDragged(with event: NSEvent) {
-        let p = clamp(convert(event.locationInWindow, from: nil))
+        let raw = convert(event.locationInWindow, from: nil)
+        let p = clamp(raw)
         switch drag {
         case .select(let start):
             selection = CGRect(x: min(start.x, p.x), y: min(start.y, p.y), width: abs(p.x - start.x), height: abs(p.y - start.y))
@@ -686,8 +838,12 @@ final class CaptureView: NSView, NSTextFieldDelegate {
             selection = sel
             layoutToolbars()
         case .resize(let handle, let original):
-            selection = resized(original, handle: handle, to: p)
-            layoutToolbars()
+            if mode == .stage {
+                resizeStage(original, handle: handle, to: raw)
+            } else {
+                selection = resized(original, handle: handle, to: p)
+                layoutToolbars()
+            }
         case .draw:
             guard var mark = current else { return }
             if mark.tool == .pencil {
@@ -711,13 +867,19 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     }
 
     override func mouseUp(with event: NSEvent) {
+        var areaChanged = false
         switch drag {
         case .select:
             if let sel = selection, sel.width >= 4, sel.height >= 4 {
                 editing = true
+                areaChanged = true
             } else {
                 selection = nil
             }
+        case .move:
+            areaChanged = true
+        case .resize:
+            if mode == .stage { normalizeStage() } else { areaChanged = true }
         case .draw:
             if var mark = current {
                 if mark.tool == .blur {
@@ -733,9 +895,25 @@ final class CaptureView: NSView, NSTextFieldDelegate {
             break
         }
         drag = .none
+        // Guarda a área para o ajuste "começar com a última área".
+        if areaChanged, mode == .screenshot || mode == .addToStage, let sel = selection {
+            Preferences.saveSelection(sel, on: shot.screen)
+        }
         layoutToolbars()
         needsDisplay = true
         updateCursor(at: convert(event.locationInWindow, from: nil))
+    }
+
+    /// Volta a área salva. Devolve false se ela não cabe nesta tela.
+    @discardableResult
+    func restoreSelection(_ rect: CGRect) -> Bool {
+        let r = rect.intersection(bounds).integral
+        guard r.width >= 4, r.height >= 4 else { return false }
+        selection = r
+        editing = true
+        layoutToolbars()
+        needsDisplay = true
+        return true
     }
 
     // MARK: Editar marcações
@@ -752,7 +930,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     /// Seleciona (ou tira a seleção). A cor e a espessura da barra passam a ser as da marcação.
     private func selectMark(_ index: Int?) {
         selectedMark = index
-        if let index, marks.indices.contains(index) {
+        if let index, marks.indices.contains(index), marks[index].tool != .image {
             let mark = marks[index]
             if mark.tool != .blur {
                 color = mark.color
@@ -932,19 +1110,21 @@ final class CaptureView: NSView, NSTextFieldDelegate {
             default: break
             }
         }
-        if mode == .video, event.keyCode == 36 || event.keyCode == 76 { // Enter / Enter do teclado numérico
-            startRecording()
-            return
+        if event.keyCode == 36 || event.keyCode == 76 { // Enter / Enter do teclado numérico
+            if mode == .video { startRecording(); return }
+            if mode == .addToStage { host?.sendToStage(from: self); return }
         }
         if flags.contains(.command) {
             switch event.charactersIgnoringModifiers?.lowercased() {
-            case "c" where mode == .screenshot: copyToClipboard(); return
-            case "s" where mode == .screenshot: saveAsPNG(); return
+            case "c" where mode.allowsMarks: copyToClipboard(); return
+            case "s" where mode.allowsMarks: saveAsPNG(); return
             case "z":
                 if flags.contains(.shift) { redo() } else { undo() }
                 return
-            case "n" where mode == .screenshot: controller?.newCapture(); return
-            case "r": startRecording(); return
+            case "r" where mode == .screenshot || mode == .video: startRecording(); return
+            case "]" where mode.allowsMarks: moveSelectedMark(forward: true); return
+            case "[" where mode.allowsMarks: moveSelectedMark(forward: false); return
+            case "w" where mode == .stage: host?.close(); return
             default: break
             }
         }
@@ -956,8 +1136,8 @@ final class CaptureView: NSView, NSTextFieldDelegate {
             cancelText()
         } else if selectedMark != nil {
             selectMark(nil)
-        } else {
-            controller?.close()
+        } else if mode != .stage {
+            host?.close()
         }
     }
 
@@ -972,24 +1152,42 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     // MARK: Desfoque
 
     /// A captura inteira desfocada (na resolução real), para a prévia enquanto arrasta.
-    private func blurredScreen(for width: CGFloat) -> NSImage? {
-        if let blurCache, blurCache.width == width { return blurCache.image }
-        guard let cg = blurredCG(for: width) else { return nil }
-        let image = NSImage(cgImage: cg, size: bounds.size)
-        blurCache = (width, cg, image)
-        return image
-    }
+    private func blurredScreen(for width: CGFloat) -> NSImage? { blurred(for: width)?.image }
 
-    private func blurredCG(for width: CGFloat) -> CGImage? {
-        if let blurCache, blurCache.width == width { return blurCache.cg }
-        let scale = CGFloat(shot.image.width) / bounds.width
-        let input = CIImage(cgImage: shot.image)
+    private func blurredCG(for width: CGFloat) -> CGImage? { blurred(for: width)?.cg }
+
+    private func blurred(for width: CGFloat) -> (cg: CGImage, image: NSImage)? {
+        // No palco, o desfoque muda quando as imagens mudam de lugar ou de tamanho.
+        let key = mode == .stage ? marks.filter { $0.tool == .image }.map(\.frame) : []
+        if let blurCache, blurCache.width == width, blurCache.key == key { return (blurCache.cg, blurCache.image) }
+        guard let source = blurSource() else { return nil }
+        let scale = CGFloat(source.width) / bounds.width
+        let input = CIImage(cgImage: source)
         guard let filter = CIFilter(name: "CIGaussianBlur") else { return nil }
         filter.setValue(input.clampedToExtent(), forKey: kCIInputImageKey)
         filter.setValue(Mark.blurRadius(for: width) * scale, forKey: kCIInputRadiusKey)
         guard let output = filter.outputImage?.cropped(to: input.extent),
               let cg = Self.ciContext.createCGImage(output, from: input.extent) else { return nil }
-        return cg
+        let image = NSImage(cgImage: cg, size: bounds.size)
+        blurCache = (width, key, cg, image)
+        return (cg, image)
+    }
+
+    /// O que fica embaixo do desfoque: a tela capturada, ou no palco as imagens das camadas.
+    private func blurSource() -> CGImage? {
+        guard mode == .stage else { return shot.image }
+        let scale = min(pixelScale, 4096 / max(bounds.width, bounds.height, 1))
+        let w = Int(bounds.width * scale), h = Int(bounds.height * scale)
+        guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.translateBy(x: 0, y: CGFloat(h))
+        ctx.scaleBy(x: scale, y: -scale)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: true)
+        for mark in marks where mark.tool == .image { mark.draw() }
+        NSGraphicsContext.restoreGraphicsState()
+        return ctx.makeImage()
     }
 
     /// Ao soltar, a marcação guarda só o pedaço desfocado da área (leve), alinhado aos pixels.
@@ -1019,6 +1217,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         undoStack.append(snapshot ?? marks)
         redoStack = []
         updateHistoryButtons()
+        host?.contentChanged()
     }
 
     private func resetHistory() {
@@ -1069,7 +1268,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         lineWidth = width
         UserDefaults.standard.set(Double(width), forKey: Self.lineWidthKey)
         if !fromSlider { thickness.value = width }
-        if let i = selectedMark, marks.indices.contains(i) {
+        if let i = selectedMark, marks.indices.contains(i), marks[i].tool != .image {
             pushHistory(key: "espessura-\(i)")
             var mark = marks[i]
             mark.width = width
@@ -1094,7 +1293,10 @@ final class CaptureView: NSView, NSTextFieldDelegate {
 
     /// Com uma ferramenta ou marcação escolhida, a roda do mouse engrossa (para cima) ou afina (para baixo) o traço.
     override func scrollWheel(with event: NSEvent) {
-        guard mode == .screenshot, editing, tool != nil || selectedMark != nil else { return super.scrollWheel(with: event) }
+        let selectedIsImage = selectedMark.map { marks.indices.contains($0) && marks[$0].tool == .image } ?? false
+        guard mode.allowsMarks, editing, tool != nil || (selectedMark != nil && !selectedIsImage) else {
+            return super.scrollWheel(with: event)
+        }
         // Sentido físico da roda, ignorando a "rolagem natural".
         let dy = event.isDirectionInvertedFromDevice ? -event.scrollingDeltaY : event.scrollingDeltaY
         var steps: CGFloat = 0
@@ -1129,17 +1331,20 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     func renderImage() -> (image: NSImage, png: Data)? {
         commitText()
         guard let sel = selection?.integral, sel.width >= 1, sel.height >= 1 else { return nil }
-        let scale = CGFloat(shot.image.width) / bounds.width
+        let scale = pixelScale
         let pixelRect = CGRect(x: sel.minX * scale, y: sel.minY * scale, width: sel.width * scale, height: sel.height * scale).integral
-        guard let crop = shot.image.cropping(to: pixelRect),
-              let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: crop.width, pixelsHigh: crop.height,
+        // No palco não há tela embaixo: o fundo é transparente e as imagens são camadas.
+        let crop = mode == .stage ? nil : shot.image.cropping(to: pixelRect)
+        if mode != .stage, crop == nil { return nil }
+        let pixelsWide = crop?.width ?? Int(pixelRect.width), pixelsHigh = crop?.height ?? Int(pixelRect.height)
+        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: pixelsWide, pixelsHigh: pixelsHigh,
                                          bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
                                          colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
               let context = NSGraphicsContext(bitmapImageRep: rep) else { return nil }
         let cg = context.cgContext
-        cg.draw(crop, in: CGRect(x: 0, y: 0, width: crop.width, height: crop.height))
+        if let crop { cg.draw(crop, in: CGRect(x: 0, y: 0, width: crop.width, height: crop.height)) }
         // Marcações: mesma escala da tela e origem em cima, como no seletor.
-        cg.translateBy(x: 0, y: CGFloat(crop.height))
+        cg.translateBy(x: 0, y: CGFloat(pixelsHigh))
         cg.scaleBy(x: scale, y: -scale)
         cg.translateBy(x: -sel.minX, y: -sel.minY)
         NSGraphicsContext.saveGraphicsState()
@@ -1157,7 +1362,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     private func startRecording() {
         commitText()
         let rect = selection.flatMap { $0.width >= 8 && $0.height >= 8 ? $0.integral : nil }
-        controller?.record(screen: shot.screen, rect: rect)
+        host?.record(screen: shot.screen, rect: rect)
     }
 
     private func copyToClipboard() {
@@ -1167,12 +1372,12 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         pasteboard.setData(result.png, forType: .png)
         if let tiff = result.image.tiffRepresentation { pasteboard.setData(tiff, forType: .tiff) }
         NSSound(named: "Pop")?.play()
-        controller?.close()
+        if mode == .stage { host?.exported() } else { host?.close() }
     }
 
     private func saveAsPNG() {
         guard let result = renderImage() else { return }
-        controller?.close()
+        if mode != .stage { host?.close() }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.png]
         panel.canCreateDirectories = true
@@ -1184,12 +1389,142 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         UserDefaults.standard.set(url.deletingLastPathComponent().path, forKey: "saveFolder")
         do {
             try result.png.write(to: url)
+            host?.exported()
         } catch {
             let alert = NSAlert()
             alert.messageText = "Não foi possível salvar"
             alert.informativeText = error.localizedDescription
             alert.runModal()
         }
+    }
+
+    // MARK: Compartilhar
+
+    private func showShareMenu(from button: NSView) {
+        let menu = NSMenu()
+        let note = NSMenuItem(title: "Criar nota no Notas", action: #selector(shareToNotes), keyEquivalent: "")
+        note.image = Sharing.appIcon(bundleID: "com.apple.Notes")
+        let mail = NSMenuItem(title: "Enviar por e-mail", action: #selector(shareByEmail), keyEquivalent: "")
+        mail.image = Sharing.appIcon(bundleID: "com.apple.mail")
+        for item in [note, mail] {
+            item.target = self
+            menu.addItem(item)
+        }
+        menu.popUp(positioning: nil, at: CGPoint(x: 0, y: button.isFlipped ? button.bounds.maxY + 4 : -4), in: button)
+    }
+
+    @objc private func shareToNotes() { share(to: .notes) }
+    @objc private func shareByEmail() { share(to: .email) }
+
+    private func share(to target: Sharing.Target) {
+        guard let result = renderImage() else { return }
+        if mode == .stage { host?.exported() } else { host?.close() }
+        Sharing.share(png: result.png, image: result.image, to: target, window: mode == .stage ? window : nil)
+    }
+
+    // MARK: Palco
+
+    /// A área escolhida (sem marcações por cima) e as marcações dela, para virar camada no palco.
+    func stageItem() -> StageItem? {
+        commitText()
+        let sel = selection.flatMap { $0.width >= 4 && $0.height >= 4 ? $0.integral : nil } ?? bounds
+        let scale = pixelScale
+        let pixelRect = CGRect(x: sel.minX * scale, y: sel.minY * scale, width: sel.width * scale, height: sel.height * scale).integral
+        guard let crop = shot.image.cropping(to: pixelRect) else { return nil }
+        let marks = mode.allowsMarks ? self.marks.map { $0.moved(by: -sel.minX, -sel.minY) } : []
+        return StageItem(image: NSImage(cgImage: crop, size: sel.size), marks: marks, scale: scale)
+    }
+
+    var stageSize: CGSize { selection?.size ?? .zero }
+
+    /// Nova captura no palco: ao lado (ou embaixo, se o palco já é largo) do que já existe; o palco cresce para caber.
+    func addStageItem(_ item: StageItem) {
+        guard mode == .stage, let stage = selection else { return }
+        let m = Self.stageMargin
+        var origin = CGPoint(x: m, y: m)
+        if marks.contains(where: { $0.tool == .image }) {
+            let content = contentBounds()
+            origin = stage.width > stage.height * 1.3 ? CGPoint(x: m, y: content.maxY + 24) : CGPoint(x: content.maxX + 24, y: m)
+        }
+        pushHistory()
+        var layer = Mark(tool: .image, points: [origin, CGPoint(x: origin.x + item.image.size.width, y: origin.y + item.image.size.height)],
+                         color: .clear)
+        layer.image = item.image
+        // Imagens ficam embaixo das marcações; a nova vai por cima das outras imagens.
+        let index = marks.lastIndex(where: { $0.tool == .image }).map { $0 + 1 } ?? 0
+        marks.insert(layer, at: index)
+        marks.append(contentsOf: item.marks.map { $0.moved(by: origin.x, origin.y) })
+        pixelScale = max(pixelScale, item.scale)
+        selection = stage.union(contentBounds())
+        selectedMark = nil
+        normalizeStage()
+        updateHistoryButtons()
+    }
+
+    /// Tudo o que foi desenhado ou colado no palco.
+    private func contentBounds() -> CGRect {
+        marks.reduce(CGRect.null) { box, mark in
+            let pad: CGFloat
+            switch mark.tool {
+            case .image, .text, .blur: pad = 0
+            case .arrow: pad = mark.width * 3 + 8
+            default: pad = mark.width / 2 + 2
+            }
+            return box.union(mark.frame.insetBy(dx: -pad, dy: -pad))
+        }
+    }
+
+    func fitStageToContent() {
+        let content = contentBounds()
+        guard !content.isNull, content.width >= 1, content.height >= 1 else { return }
+        selection = content.integral
+        normalizeStage()
+    }
+
+    func setStageSize(_ size: CGSize) {
+        guard let stage = selection else { return }
+        selection = CGRect(origin: stage.origin, size: CGSize(width: max(size.width, 16), height: max(size.height, 16)))
+        normalizeStage()
+    }
+
+    /// Puxando as alças do palco: cresce para a direita e para baixo sem limite.
+    private func resizeStage(_ original: CGRect, handle: Int, to p: CGPoint) {
+        let r = Mark.resize(original, handle: handle, to: CGPoint(x: max(p.x, 0), y: max(p.y, 0)))
+        selection = r
+        let m = Self.stageMargin
+        if r.maxX + m > bounds.width || r.maxY + m > bounds.height {
+            setFrameSize(CGSize(width: max(bounds.width, r.maxX + m), height: max(bounds.height, r.maxY + m)))
+        }
+        host?.contentChanged()
+    }
+
+    /// Deixa o palco começando na margem e a view do tamanho dele (as marcações acompanham).
+    private func normalizeStage() {
+        guard mode == .stage, let stage = selection else { return }
+        let m = Self.stageMargin
+        let dx = m - stage.minX, dy = m - stage.minY
+        if dx != 0 || dy != 0 {
+            marks = marks.map { $0.moved(by: dx, dy) }
+            undoStack = undoStack.map { $0.map { $0.moved(by: dx, dy) } }
+            redoStack = redoStack.map { $0.map { $0.moved(by: dx, dy) } }
+        }
+        let size = CGSize(width: stage.width.rounded(), height: stage.height.rounded())
+        selection = CGRect(origin: CGPoint(x: m, y: m), size: size)
+        setFrameSize(CGSize(width: size.width + 2 * m, height: size.height + 2 * m))
+        blurCache = nil
+        host?.contentChanged()
+        needsDisplay = true
+    }
+
+    /// ⌘] traz a marcação selecionada uma camada para a frente; ⌘[ leva para trás.
+    private func moveSelectedMark(forward: Bool) {
+        guard let i = selectedMark, marks.indices.contains(i) else { return }
+        let j = forward ? i + 1 : i - 1
+        guard marks.indices.contains(j) else { return }
+        pushHistory()
+        marks.swapAt(i, j)
+        selectedMark = j
+        needsDisplay = true
     }
 
     static func fileName(_ date: Date = Date()) -> String {

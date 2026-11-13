@@ -26,6 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var settings: SettingsWindowController?
     private var recording: RecordingController?
     private var startingRecording = false
+    private var stage: StageWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.appearance = NSAppearance(named: .darkAqua)
@@ -84,9 +85,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         folder.image = NSImage(systemSymbolName: "film.stack", accessibilityDescription: nil)
         menu.addItem(folder)
         menu.addItem(.separator())
-        let shortcut = NSMenuItem(title: "Atalho…", action: #selector(openSettings), keyEquivalent: ",")
-        shortcut.image = NSImage(systemSymbolName: "keyboard", accessibilityDescription: nil)
-        menu.addItem(shortcut)
+        let settings = NSMenuItem(title: "Ajustes…", action: #selector(openSettings), keyEquivalent: ",")
+        settings.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: nil)
+        menu.addItem(settings)
         menu.addItem(.separator())
         let about = NSMenuItem(title: "PrintScreen \(AppInfo.version)", action: nil, keyEquivalent: "")
         about.isEnabled = false
@@ -122,26 +123,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func startCapture(mode: CaptureMode = .screenshot) {
         guard capture == nil, recording == nil, !startingRecording else { return }
         guard ScreenCapture.hasPermission() else {
+            if mode == .addToStage { stage?.show() }
             ScreenCapture.askPermission()
             return
         }
         Task {
             do {
                 let shots = try await ScreenCapture.captureAllScreens()
-                guard !shots.isEmpty else { return }
+                guard !shots.isEmpty else {
+                    if mode == .addToStage { stage?.show() }
+                    return
+                }
                 let controller = CaptureController(shots: shots, mode: mode,
                                                    onRecord: { screen, rect in self.startRecording(screen: screen, rect: rect) },
-                                                   onNewCapture: {
-                                                       // Espera as janelas do seletor sumirem para elas não saírem na foto nova.
-                                                       DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { self.startCapture(mode: mode) }
-                                                   },
-                                                   onClose: { self.capture = nil })
+                                                   onSendToStage: { item, captureAgain in self.addToStage(item, captureAgain: captureAgain) },
+                                                   onClose: {
+                                                       self.capture = nil
+                                                       // Esc ao escolher mais uma captura: volta para o palco.
+                                                       if mode == .addToStage { self.stage?.show() }
+                                                   })
                 capture = controller
                 controller.show()
             } catch {
+                if mode == .addToStage { stage?.show() }
                 ScreenCapture.askPermission(error: error)
             }
         }
+    }
+
+    // MARK: Palco
+
+    /// Uma captura vai para o palco (abre o palco se ainda não existe). `captureAgain`: já escolhe a próxima.
+    private func addToStage(_ item: StageItem, captureAgain: Bool) {
+        if let stage {
+            stage.add(item)
+        } else {
+            let stage = StageWindowController(first: item)
+            stage.onAddCapture = { [weak self] in self?.captureForStage() }
+            stage.onClose = { [weak self] in self?.stage = nil }
+            self.stage = stage
+        }
+        if captureAgain { captureForStage() } else { stage?.show() }
+    }
+
+    /// Esconde o palco (para ele não sair na foto) e abre o seletor de mais uma captura.
+    private func captureForStage() {
+        stage?.hide()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in self?.startCapture(mode: .addToStage) }
     }
 
     func startRecording(screen: NSScreen, rect: CGRect?) {

@@ -3,7 +3,7 @@
 Captura de tela para macOS no estilo do Lightshot: aperte o atalho, escolha a área, marque e copie ou salve.
 
 ## Como usar
-- **Atalho:** ⇧⌘2 (padrão). Troque em ícone da barra de menus › Atalho…
+- **Atalho:** ⇧⌘2 (padrão). Troque em ícone da barra de menus › Ajustes…
 - **Abrir o app tira o print:** abrir o PrintScreen pelo Finder, Spotlight ou por uma tecla que "abre aplicativo"
   já captura, esteja ele fechado ou aberto.
 - **Tecla de print do teclado (Logitech MX Keys e outros):** essas teclas especiais não aparecem na janela do atalho.
@@ -20,7 +20,23 @@ Captura de tela para macOS no estilo do Lightshot: aperte o atalho, escolha a á
   Com ela selecionada, a cor, a espessura e a roda do mouse mudam só ela; Delete apaga e as setas do teclado
   empurram (Shift: de 10 em 10). Esc tira a seleção.
 - **Desfazer / refazer:** ⌘Z e ⇧⌘Z, ou os botões da barra. Volta também o que foi movido, redimensionado ou apagado.
-- **Nova captura:** botão ⊞ da barra (⌘N) fecha esta e fotografa a tela de novo, como ela está agora.
+- **Compartilhar:** botão ⬆︎ da barra de baixo › **Criar nota no Notas** ou **Enviar por e-mail** (abre o Mail com a
+  imagem anexada).
+
+## Ajustes (ícone da barra de menus › Ajustes…)
+- **Ferramenta já escolhida:** a captura já abre com ela (ex.: Seta) — é só arrastar a área e desenhar.
+- **Começar com a última área escolhida:** ao apertar o atalho, a área da última captura já vem marcada; dá para
+  copiar na hora (⌘C), desenhar ou ajustar. Clicar fora dela escolhe outra.
+
+## Palco (várias capturas juntas, em camadas)
+- Na captura, o botão ⊞ da barra lateral manda a área (com as marcações) para o **palco** e já abre a escolha da
+  próxima captura. Escolha a área e clique em **Adicionar ao palco** (Enter). Esc volta para o palco.
+- No palco: clique numa imagem para selecionar, arraste para mover e puxe os cantos para mudar o tamanho (mantém a
+  proporção). Setas, textos, desfoque e as outras ferramentas funcionam igual, por cima das imagens.
+- **Tamanho do palco:** puxe as alças da borda, digite largura × altura em pixels ou use **Ajustar ao conteúdo**.
+  Onde não tem imagem, o PNG sai transparente.
+- **Camadas:** ⌘] traz a selecionada para a frente, ⌘[ leva para trás. **Adicionar captura** põe mais uma.
+- Copiar, salvar e compartilhar ficam no canto de cima; fechar sem salvar pede confirmação.
 - **Terminar:** copiar (⌘C) ou salvar em PNG (⌘S). Esc cancela.
 
 Funciona em todas as telas conectadas e captura na resolução real (Retina).
