@@ -227,6 +227,7 @@ final class CaptureController: CaptureHost {
 
     func show() {
         keepAlive = self
+        HotKey.shared.registerEscape { [weak self] in self?.escapePressed() }
         NSApp.activate(ignoringOtherApps: true)
         for window in windows { window.orderFrontRegardless() }
         // A tela onde está o mouse recebe o teclado (Esc, ⌘C, ⌘S…).
@@ -238,9 +239,16 @@ final class CaptureController: CaptureHost {
            let view = window.contentView as? CaptureView, view.restoreSelection(last.rect) {
             main = window
         }
-        main?.makeKey()
+        main?.makeKeyAndOrderFront(nil)
         main?.makeFirstResponder(main?.contentView)
         NSCursor.crosshair.set()
+    }
+
+    /// Esc: cancela o texto sendo digitado, depois tira a seleção da marcação, depois fecha.
+    private func escapePressed() {
+        let views = windows.compactMap { $0.contentView as? CaptureView }
+        let view = views.first { $0.window?.isKeyWindow == true } ?? views.first { $0.selection != nil } ?? views.first
+        if let view { view.cancelOperation(nil) } else { close() }
     }
 
     /// Só uma tela tem seleção por vez.
@@ -255,6 +263,7 @@ final class CaptureController: CaptureHost {
 
     func close() {
         guard keepAlive != nil || !windows.isEmpty else { return }
+        HotKey.shared.unregisterEscape()
         for window in windows { window.orderOut(nil) }
         windows = []
         keepAlive = nil
@@ -277,9 +286,13 @@ final class CaptureController: CaptureHost {
     }
 }
 
-final class OverlayWindow: NSWindow {
+/// Painel que recebe o teclado (Esc, ⌘C…) mesmo quando o macOS não deixa o PrintScreen vir para a frente.
+final class OverlayWindow: NSPanel {
     init(screen: NSScreen) {
-        super.init(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
+        super.init(contentRect: screen.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        isFloatingPanel = true
+        hidesOnDeactivate = false
+        becomesKeyOnlyIfNeeded = false
         // Acima da barra de menus e do Dock, mas abaixo dos menus (a paleta de cores abre por cima).
         level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
         isOpaque = false
@@ -358,6 +371,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     private var toolButtons: [Tool: ToolButton] = [:]
     private let colorButton = ToolButton(symbol: nil, help: "Cor")
     private let thickness = ThicknessControl()
+    private let idleCancel = LabelButton(symbol: "xmark", title: "Cancelar", help: "Cancelar a captura (Esc)", style: .secondary)
     private let undoButton = ToolButton(symbol: "arrow.uturn.backward", help: "Desfazer (⌘Z)")
     private let redoButton = ToolButton(symbol: "arrow.uturn.forward", help: "Refazer (⇧⌘Z)")
 
@@ -481,8 +495,10 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         }
         let record = ToolButton(symbol: "record.circle", help: mode == .video ? "Gravar vídeo da área (Enter)" : "Gravar vídeo da área (⌘R)")
         record.onClick = { [weak self] in self?.startRecording() }
-        let close = ToolButton(symbol: "xmark", help: mode == .addToStage ? "Voltar ao palco (Esc)" : "Fechar (Esc)")
+        let close = LabelButton(symbol: "xmark", title: "Cancelar", help: mode == .addToStage ? "Voltar ao palco (Esc)" : "Cancelar a captura (Esc)",
+                                style: .secondary)
         close.onClick = { [weak self] in self?.closeCapture() }
+        idleCancel.onClick = { [weak self] in self?.closeCapture() }
         switch mode {
         case .video:
             let start = LabelButton(symbol: "record.circle.fill", title: "Gravar", help: "Gravar vídeo da área (Enter)")
@@ -509,6 +525,12 @@ final class CaptureView: NSView, NSTextFieldDelegate {
                 bar.isHidden = true
                 addSubview(bar)
             }
+            // Antes de escolher a área: Cancelar logo abaixo da dica do meio da tela.
+            addSubview(idleCancel)
+            NSLayoutConstraint.activate([
+                idleCancel.centerXAnchor.constraint(equalTo: centerXAnchor),
+                idleCancel.topAnchor.constraint(equalTo: centerYAnchor, constant: 34)
+            ])
         }
         updateColorButton()
     }
@@ -585,6 +607,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
 
     private func layoutToolbars() {
         guard mode != .stage else { return }
+        idleCancel.isHidden = selection != nil
         guard editing, let sel = selection else {
             toolBar.isHidden = true
             actionBar.isHidden = true
@@ -1698,9 +1721,11 @@ final class ToolbarSeparator: NSView {
 
 /// Botão principal com texto (azul do sistema), como o "Gravar" do modo vídeo.
 final class LabelButton: NSButton {
+    enum Style { case primary, secondary }
+
     var onClick: (() -> Void)?
 
-    init(symbol: String, title: String, help: String) {
+    init(symbol: String, title: String, help: String, style: Style = .primary) {
         super.init(frame: .zero)
         image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
             .withSymbolConfiguration(.init(pointSize: 13, weight: .semibold))
@@ -1714,7 +1739,7 @@ final class LabelButton: NSButton {
         toolTip = help
         wantsLayer = true
         layer?.cornerRadius = 7
-        layer?.backgroundColor = NSColor.systemBlue.cgColor
+        layer?.backgroundColor = style == .primary ? NSColor.systemBlue.cgColor : NSColor(calibratedWhite: 0.32, alpha: 0.92).cgColor
         target = self
         action = #selector(clicked)
         translatesAutoresizingMaskIntoConstraints = false

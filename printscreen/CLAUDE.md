@@ -15,12 +15,15 @@ Responder sempre em português (PT-BR), direto ao ponto.
 ## Regras de código
 - Mesma regra do Limpo: **não usar `@State`, `@Bindable` nem outras macros do SwiftUI** (as Command Line Tools não têm o plugin). A interface é AppKit.
 - Visual: cores do sistema da Apple em modo escuro; barras em vidro escuro (`NSVisualEffectView` .hudWindow), ícones SF Symbols brancos, ferramenta ativa em azul do sistema.
+- Seletor em `NSPanel` não ativador (recebe o teclado sem tirar o foco do outro app). Nunca deixar o seletor sem um
+  jeito de fechar: `CaptureController` se mantém vivo enquanto está na tela e só uma captura começa por vez.
 - Captura com ScreenCaptureKit (`SCScreenshotManager`), uma janela de seleção por tela, na resolução real (Retina).
 - Atalho global pelo Carbon (`RegisterEventHotKey`): não precisa de permissão de Acessibilidade.
 
 ## Estrutura
 - `PrintScreenApp.swift` — entrada, ícone e menu na barra de menus.
-- `HotKey.swift` — atalho global e o formato salvo (`Shortcut`).
+- `HotKey.swift` — atalho global e o formato salvo (`Shortcut`). Enquanto o seletor está aberto, o Esc também vira
+  atalho global (`registerEscape`): cancela mesmo quando o macOS não deixa o PrintScreen vir para a frente.
 - `ScreenCapture.swift` — captura das telas e pedido de permissão de Gravação de Tela.
 - `CaptureOverlay.swift` — seletor (mover/redimensionar), marcações (`Mark`: lápis, linha, seta, quadrado, círculo, texto e desfoque, cada uma
   com a sua espessura `width`; o desfoque guarda só o recorte borrado, `CIGaussianBlur`), Shift restringe ângulos e proporção, cor, espessura (`ThicknessControl` e roda do mouse), desfazer/refazer, nova captura, copiar e salvar PNG.

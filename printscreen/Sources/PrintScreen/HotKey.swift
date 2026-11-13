@@ -66,14 +66,19 @@ final class HotKey {
 
     var onPress: (() -> Void)?
     private var ref: EventHotKeyRef?
+    private var escapeRef: EventHotKeyRef?
+    private var onEscape: (() -> Void)?
     private var handlerInstalled = false
+    private static let signature = OSType(0x5052_5453) // "PRTS"
+    private static let captureID: UInt32 = 1
+    private static let escapeID: UInt32 = 2
 
     /// Registra o atalho. Devolve false se outro app já usa essa combinação.
     @discardableResult
     func register(_ shortcut: Shortcut) -> Bool {
         unregister()
         installHandler()
-        let id = EventHotKeyID(signature: OSType(0x5052_5453), id: 1) // "PRTS"
+        let id = EventHotKeyID(signature: Self.signature, id: Self.captureID)
         let status = RegisterEventHotKey(shortcut.keyCode, shortcut.modifiers, id, GetApplicationEventTarget(), 0, &ref)
         return status == noErr
     }
@@ -83,12 +88,35 @@ final class HotKey {
         ref = nil
     }
 
+    /// Enquanto o seletor está aberto, o Esc é dele, esteja o PrintScreen na frente ou não.
+    func registerEscape(_ handler: @escaping () -> Void) {
+        unregisterEscape()
+        installHandler()
+        onEscape = handler
+        let id = EventHotKeyID(signature: Self.signature, id: Self.escapeID)
+        RegisterEventHotKey(UInt32(kVK_Escape), 0, id, GetApplicationEventTarget(), 0, &escapeRef)
+    }
+
+    func unregisterEscape() {
+        if let escapeRef { UnregisterEventHotKey(escapeRef) }
+        escapeRef = nil
+        onEscape = nil
+    }
+
+    fileprivate func fire(_ id: UInt32) {
+        if id == Self.escapeID { onEscape?() } else { onPress?() }
+    }
+
     private func installHandler() {
         guard !handlerInstalled else { return }
         handlerInstalled = true
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-        InstallEventHandler(GetApplicationEventTarget(), { _, _, _ in
-            Task { @MainActor in HotKey.shared.onPress?() }
+        InstallEventHandler(GetApplicationEventTarget(), { _, event, _ in
+            var hotKey = EventHotKeyID()
+            let status = GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
+                                           nil, MemoryLayout<EventHotKeyID>.size, nil, &hotKey)
+            let id = status == noErr ? hotKey.id : 1
+            Task { @MainActor in HotKey.shared.fire(id) }
             return noErr
         }, 1, &spec, nil, nil)
     }

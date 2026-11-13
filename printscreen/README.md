@@ -37,7 +37,9 @@ Captura de tela para macOS no estilo do Lightshot: aperte o atalho, escolha a á
   Onde não tem imagem, o PNG sai transparente.
 - **Camadas:** ⌘] traz a selecionada para a frente, ⌘[ leva para trás. **Adicionar captura** põe mais uma.
 - Copiar, salvar e compartilhar ficam no canto de cima; fechar sem salvar pede confirmação.
-- **Terminar:** copiar (⌘C) ou salvar em PNG (⌘S); um aviso confirma ("Copiado", "Imagem salva"). Esc cancela.
+- **Terminar:** copiar (⌘C) ou salvar em PNG (⌘S); um aviso confirma ("Copiado", "Imagem salva").
+- **Cancelar:** Esc ou o botão **Cancelar** (no meio da tela antes de escolher a área, e na barra depois). O Esc
+  funciona mesmo se outro app estiver na frente.
 
 Funciona em todas as telas conectadas e captura na resolução real (Retina).
 
