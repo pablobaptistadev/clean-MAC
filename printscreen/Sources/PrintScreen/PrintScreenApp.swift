@@ -26,6 +26,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var settings: SettingsWindowController?
     private var recording: RecordingController?
     private var startingRecording = false
+    /// Uma captura está começando (fotografando a tela): outro toque no atalho não abre uma segunda por cima.
+    private var startingCapture = false
     private var stage: StageWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -121,13 +123,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func startCapture(mode: CaptureMode = .screenshot) {
-        guard capture == nil, recording == nil, !startingRecording else { return }
+        guard capture == nil, !startingCapture, recording == nil, !startingRecording else { return }
         guard ScreenCapture.hasPermission() else {
             if mode == .addToStage { stage?.show() }
             ScreenCapture.askPermission()
             return
         }
+        startingCapture = true
         Task {
+            defer { startingCapture = false }
             do {
                 let shots = try await ScreenCapture.captureAllScreens()
                 guard !shots.isEmpty else {

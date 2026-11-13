@@ -203,6 +203,8 @@ extension CaptureHost {
 @MainActor
 final class CaptureController: CaptureHost {
     private var windows: [OverlayWindow] = []
+    /// Enquanto as janelas estão na tela, o controller se mantém vivo (o seletor nunca fica sem dono).
+    private var keepAlive: CaptureController?
     private let mode: CaptureMode
     private let onClose: () -> Void
     private let onRecord: (NSScreen, CGRect?) -> Void
@@ -224,6 +226,7 @@ final class CaptureController: CaptureHost {
     }
 
     func show() {
+        keepAlive = self
         NSApp.activate(ignoringOtherApps: true)
         for window in windows { window.orderFrontRegardless() }
         // A tela onde está o mouse recebe o teclado (Esc, ⌘C, ⌘S…).
@@ -251,8 +254,10 @@ final class CaptureController: CaptureHost {
     }
 
     func close() {
+        guard keepAlive != nil || !windows.isEmpty else { return }
         for window in windows { window.orderOut(nil) }
         windows = []
+        keepAlive = nil
         onClose()
     }
 
@@ -477,7 +482,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         let record = ToolButton(symbol: "record.circle", help: mode == .video ? "Gravar vídeo da área (Enter)" : "Gravar vídeo da área (⌘R)")
         record.onClick = { [weak self] in self?.startRecording() }
         let close = ToolButton(symbol: "xmark", help: mode == .addToStage ? "Voltar ao palco (Esc)" : "Fechar (Esc)")
-        close.onClick = { [weak self] in self?.host?.close() }
+        close.onClick = { [weak self] in self?.closeCapture() }
         switch mode {
         case .video:
             let start = LabelButton(symbol: "record.circle.fill", title: "Gravar", help: "Gravar vídeo da área (Enter)")
@@ -1137,7 +1142,16 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         } else if selectedMark != nil {
             selectMark(nil)
         } else if mode != .stage {
-            host?.close()
+            closeCapture()
+        }
+    }
+
+    /// Fecha o seletor. Se por algum motivo ele ficou sem dono, fecha a própria janela (nunca fica preso na tela).
+    func closeCapture() {
+        if let host {
+            host.close()
+        } else {
+            window?.orderOut(nil)
         }
     }
 
@@ -1373,7 +1387,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         if let tiff = result.image.tiffRepresentation { pasteboard.setData(tiff, forType: .tiff) }
         NSSound(named: "Pop")?.play()
         let point = toastPoint()
-        if mode == .stage { host?.exported() } else { host?.close() }
+        if mode == .stage { host?.exported() } else { closeCapture() }
         Toast.show("Copiado", detail: "Cole com ⌘V onde quiser", at: point)
     }
 
@@ -1391,7 +1405,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     private func saveAsPNG() {
         guard let result = renderImage() else { return }
         let point = toastPoint()
-        if mode != .stage { host?.close() }
+        if mode != .stage { closeCapture() }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.png]
         panel.canCreateDirectories = true
@@ -1433,7 +1447,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
 
     private func share(to target: Sharing.Target) {
         guard let result = renderImage() else { return }
-        if mode == .stage { host?.exported() } else { host?.close() }
+        if mode == .stage { host?.exported() } else { closeCapture() }
         Sharing.share(png: result.png, image: result.image, to: target, window: mode == .stage ? window : nil)
     }
 
