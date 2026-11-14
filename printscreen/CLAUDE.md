@@ -33,11 +33,15 @@ Responder sempre em português (PT-BR), direto ao ponto.
   (`undoStack`/`redoStack`); mudanças seguidas com a mesma chave (roda, cor, setas) viram um passo só.
 - `Preferences.swift` — ajustes: ferramenta inicial, começar com a última área (salva por tela em `lastSelection`),
   palco da área (`selectionFormat`) e a tecla de mover (`moveModifier`).
-- `AreaFormat.swift` — palcos prontos (`SelectionFormat`: livre, widescreen 1920 × 1080, quadrada 1080 × 1080, sempre no meio
-  da tela; `snap` acerta pixels inteiros na proporção exata), alças e área nova com proporção travada (`corner`, `resize`),
+- `AreaFormat.swift` — palcos prontos (`SelectionFormat`: livre, widescreen 1920 × 1080, mobile 1080 × 1920, quadrada 1080 × 1080,
+  sempre no meio da tela; `snap` acerta pixels inteiros na proporção exata), alças e área nova com proporção travada
+  (`corner`, `resize`; só com `Preferences.keepRatio`, o switch `PremiumSwitch` da barra, desenhado à mão porque o
+  `NSSwitch` fica cinza com o app em segundo plano),
   `MoveModifier` e os ícones vetoriais desenhados em código (`AreaIcon`). No `CaptureView`, `moveMode` (botão de mãozinha/M)
   e a tecla segurada fazem o arrastar mover a área antes de qualquer outra coisa (`movesArea`).
-- `Sharing.swift` — compartilhar o PNG: extensão do Notas (`com.apple.Notes.SharingExtension`) e `.composeEmail` (Mail).
+- `Sharing.swift` — compartilhar o PNG: Notas (`com.apple.Notes.SharingExtension`), Mail, Mensagens, AirDrop, apps de
+  conversa sem extensão (`ChatApp`: WhatsApp e outros; abre o arquivo no app e deixa copiado) e "Mais apps"
+  (`NSSharingServicePicker.standardShareMenuItem`).
 - `Stage.swift` — palco: `StageItem` (captura indo para o palco) e `StageWindowController` (janela com barra de cima,
   ferramentas à esquerda e o `CaptureView` no modo `.stage` dentro de um `NSScrollView`). As capturas são marcações
   `Tool.image` (camadas), então mover, redimensionar, desfazer e o resto valem para elas. `CaptureHost` é o protocolo
@@ -50,4 +54,4 @@ Responder sempre em português (PT-BR), direto ao ponto.
 
 ## Feito
 Atalho configurável · seletor de área com tamanho em pixels · seta, lápis, quadrado, círculo, texto, cor · copiar · salvar PNG ·
-gravar vídeo HEVC leve da área ou da tela inteira (0.2.0) · espessura com barra e roda do mouse, refazer e nova captura (0.3.0) · linha reta e desfoque (0.4.0) · mover, redimensionar, editar e apagar marcações; mãozinha para mover (0.5.0) · ajustes (ferramenta inicial, última área), Notas/e-mail e palco com camadas (0.6.0) · mover a área com ⌥ ou com a mãozinha, palcos prontos Widescreen, Quadrada e Tela inteira (0.7.0).
+gravar vídeo HEVC leve da área ou da tela inteira (0.2.0) · espessura com barra e roda do mouse, refazer e nova captura (0.3.0) · linha reta e desfoque (0.4.0) · mover, redimensionar, editar e apagar marcações; mãozinha para mover (0.5.0) · ajustes (ferramenta inicial, última área), Notas/e-mail e palco com camadas (0.6.0) · mover a área com ⌥ ou com a mãozinha, palcos prontos Widescreen, Quadrada e Tela inteira (0.7.0) · palco Mobile, switch de manter proporção, compartilhar com WhatsApp, Mensagens, AirDrop e mais apps (0.8.0).

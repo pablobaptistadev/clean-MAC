@@ -14,6 +14,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let formatPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let movePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let moveHint = NSTextField(wrappingLabelWithString: "")
+    private let ratioSwitch = NSSwitch()
     private var monitor: Any?
 
     override init() {
@@ -70,6 +71,14 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         formatPopup.action = #selector(formatChanged)
         let formatRow = NSStackView(views: [formatLabel, formatPopup])
         formatRow.spacing = 8
+        let ratioLabel = NSTextField(labelWithString: "Manter a proporção do palco")
+        ratioSwitch.target = self
+        ratioSwitch.action = #selector(ratioChanged)
+        let ratioRow = NSStackView(views: [ratioLabel, ratioSwitch])
+        ratioRow.spacing = 10
+        let ratioHint = NSTextField(wrappingLabelWithString: "Ligado, Widescreen, Mobile e Quadrada não perdem a proporção ao puxar as alças. Desligado, o palco só põe a área no meio da tela e o tamanho fica livre. Também dá para trocar na barra da captura.")
+        ratioHint.font = .systemFont(ofSize: 11)
+        ratioHint.textColor = .secondaryLabelColor
         rememberBox.target = self
         rememberBox.action = #selector(rememberChanged)
         let rememberHint = NSTextField(wrappingLabelWithString: "Ao apertar o atalho, a área da última captura já aparece marcada: dá para copiar na hora (⌘C), desenhar ou ajustar.")
@@ -96,11 +105,12 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let line2 = NSBox()
         line2.boxType = .separator
 
-        let stack = NSStackView(views: [title, hint, row, message, special, line, openTitle, toolRow, formatRow, rememberBox, rememberHint,
+        let stack = NSStackView(views: [title, hint, row, message, special, line, openTitle, toolRow, formatRow, ratioRow, ratioHint, rememberBox, rememberHint,
                                         line2, moveTitle, moveRow, moveHint])
         stack.setCustomSpacing(18, after: special)
         stack.setCustomSpacing(18, after: line)
         stack.setCustomSpacing(4, after: rememberBox)
+        stack.setCustomSpacing(4, after: ratioRow)
         stack.setCustomSpacing(18, after: rememberHint)
         stack.setCustomSpacing(18, after: line2)
         stack.setCustomSpacing(6, after: moveRow)
@@ -121,6 +131,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             line.widthAnchor.constraint(equalToConstant: 372),
             line2.widthAnchor.constraint(equalToConstant: 372),
             moveHint.widthAnchor.constraint(equalToConstant: 372),
+            ratioHint.widthAnchor.constraint(equalToConstant: 372),
             recorder.widthAnchor.constraint(greaterThanOrEqualToConstant: 150)
         ])
         window.contentView = content
@@ -145,6 +156,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         Preferences.selectionFormat = (formatPopup.selectedItem?.representedObject as? String).flatMap(SelectionFormat.init(rawValue:)) ?? .free
     }
 
+    @objc private func ratioChanged() {
+        Preferences.keepRatio = ratioSwitch.state == .on
+    }
+
     @objc private func moveKeyChanged() {
         Preferences.moveModifier = (movePopup.selectedItem?.representedObject as? String).flatMap(MoveModifier.init(rawValue:)) ?? .option
         refresh()
@@ -163,6 +178,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         }
         rememberBox.state = Preferences.rememberSelection ? .on : .off
         formatPopup.selectItem(at: SelectionFormat.allCases.firstIndex(of: Preferences.selectionFormat) ?? 0)
+        ratioSwitch.state = Preferences.keepRatio ? .on : .off
         let key = Preferences.moveModifier
         movePopup.selectItem(at: MoveModifier.allCases.firstIndex(of: key) ?? 0)
         moveHint.stringValue = """

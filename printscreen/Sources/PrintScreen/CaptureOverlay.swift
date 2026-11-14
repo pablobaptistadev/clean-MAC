@@ -311,7 +311,7 @@ final class OverlayWindow: NSPanel {
 // MARK: - Seletor com ferramentas
 
 @MainActor
-final class CaptureView: NSView, NSTextFieldDelegate {
+final class CaptureView: NSView, NSTextFieldDelegate, @preconcurrency NSSharingServicePickerDelegate {
     enum Drag {
         case none
         case select(start: CGPoint)
@@ -371,6 +371,10 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     private let moveKey = Preferences.moveModifier
     /// Livre, widescreen ou quadrada: com proporção, a área nova e as alças mantêm o formato.
     private(set) var format = Preferences.selectionFormat
+    /// Switch "Manter proporção": desligado, o palco só posiciona a área e as alças ficam livres.
+    private(set) var keepRatio = Preferences.keepRatio
+    /// Proporção que a área nova e as alças respeitam agora (nil = livre).
+    private var lockedRatio: CGFloat? { keepRatio ? format.ratio : nil }
 
     let toolBar = ToolbarView()
     let actionBar = ToolbarView()
@@ -383,6 +387,9 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     private lazy var moveButton = ToolButton(symbol: "hand.raised",
                                              help: "Mover a área (M) · ou segure \(moveKey.symbol) e arraste, sem largar a ferramenta")
     private var formatButtons: [SelectionFormat: ChipButton] = [:]
+    private let ratioSwitch = PremiumSwitch()
+    /// Menu "Mais apps" do compartilhar (fica vivo enquanto o menu está aberto).
+    private var sharePicker: NSSharingServicePicker?
     private let fullScreenButton = ChipButton(title: "Tela inteira", icon: AreaIcon.fullScreen,
                                               help: "Palco do tamanho da tela inteira (proporção livre)")
 
@@ -539,18 +546,23 @@ final class CaptureView: NSView, NSTextFieldDelegate {
             title.textColor = NSColor.white.withAlphaComponent(0.55)
             actionBar.add(ToolbarSpacer(width: 6))
             actionBar.add(title, spacingAfter: 6)
-            for f in [SelectionFormat.widescreen, .square] {
+            for f in [SelectionFormat.widescreen, .mobile, .square] {
                 let chip = ChipButton(title: f.title, icon: f.icon, help: f.help)
-                // Clicar no que já está azul solta a proporção (área livre).
-                chip.onClick = { [weak self] in
-                    guard let self else { return }
-                    self.chooseFormat(self.format == f ? .free : f)
-                }
+                chip.onClick = { [weak self] in self?.chooseFormat(f) }
                 formatButtons[f] = chip
                 actionBar.add(chip)
             }
             fullScreenButton.onClick = { [weak self] in self?.chooseFullScreen() }
-            actionBar.add(fullScreenButton)
+            actionBar.add(fullScreenButton, spacingAfter: 10)
+            // Manter proporção: switch (azul quando ligado).
+            let ratioLabel = NSTextField(labelWithString: "Manter proporção")
+            ratioLabel.font = .systemFont(ofSize: 12, weight: .semibold)
+            ratioLabel.textColor = NSColor.white.withAlphaComponent(0.85)
+            ratioSwitch.setOn(keepRatio, animated: false)
+            ratioSwitch.toolTip = "Ligado: Widescreen, Mobile e Quadrada mantêm a proporção ao puxar as alças. Desligado: tamanho livre."
+            ratioSwitch.onChange = { [weak self] on in self?.setKeepRatio(on) }
+            actionBar.add(ratioLabel, spacingAfter: 6)
+            actionBar.add(ratioSwitch, spacingAfter: 8)
             actionBar.add(ToolbarSeparator(vertical: true))
             updateFormatButtons()
         }
@@ -616,8 +628,8 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         needsDisplay = true
     }
 
-    /// Troca o palco. Widescreen e Quadrada já põem a área pronta no meio da tela (1920 × 1080, 1080 × 1080);
-    /// depois, a área nova e as alças mantêm a proporção. Livre só solta a proporção, sem mexer na área.
+    /// Troca o palco. Widescreen, Mobile e Quadrada põem a área pronta no meio da tela (1920 × 1080, 1080 × 1920,
+    /// 1080 × 1080); com "Manter proporção" ligado, a área nova e as alças mantêm o formato. Livre não mexe na área.
     func chooseFormat(_ f: SelectionFormat) {
         format = f
         Preferences.selectionFormat = f
@@ -640,6 +652,18 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         selection = r
         editing = true
         if mode == .screenshot || mode == .addToStage { Preferences.saveSelection(r, on: shot.screen) }
+    }
+
+    /// Liga ou desliga "Manter proporção". Ao ligar com um palco escolhido, a área volta para a proporção (mesma largura).
+    func setKeepRatio(_ on: Bool) {
+        keepRatio = on
+        Preferences.keepRatio = on
+        ratioSwitch.setOn(on, animated: true)
+        if on, format.ratio != nil, let sel = selection, mode != .stage {
+            placeArea(format.snap(sel, keepCenter: true, in: bounds, scale: pixelScale))
+        }
+        layoutToolbars()
+        needsDisplay = true
     }
 
     private func updateFormatButtons() {
@@ -863,7 +887,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         case .addToStage: hint = "Arraste para escolher a área a adicionar ao palco · Enter adiciona a tela inteira · Esc volta"
         default: hint = "Arraste para escolher a área · ⌘R grava vídeo · Esc cancela"
         }
-        let formatNote = format.ratioLabel.map { "Palco \(format.title) (\($0)) · " } ?? ""
+        let formatNote = lockedRatio == nil ? "" : format.ratioLabel.map { "Palco \(format.title) (\($0)) · " } ?? ""
         let text = (formatNote + hint) as NSString
         let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 15, weight: .medium), .foregroundColor: NSColor.white]
         let size = text.size(withAttributes: attrs)
@@ -876,7 +900,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
     private func drawSizeLabel(_ sel: CGRect) {
         let scale = pixelScale
         var label = "\(Int((sel.width * scale).rounded())) × \(Int((sel.height * scale).rounded()))"
-        if mode != .stage, let ratio = format.ratioLabel { label += "  ·  \(ratio)" }
+        if mode != .stage, lockedRatio != nil, let ratio = format.ratioLabel { label += "  ·  \(ratio)" }
         let text = label as NSString
         let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold), .foregroundColor: NSColor.white]
         let size = text.size(withAttributes: attrs)
@@ -973,7 +997,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         let p = clamp(raw)
         switch drag {
         case .select(let start):
-            if let ratio = format.ratio {
+            if let ratio = lockedRatio {
                 selection = SelectionFormat.corner(from: start, to: p, ratio: ratio, in: bounds)
             } else {
                 selection = CGRect(x: min(start.x, p.x), y: min(start.y, p.y), width: abs(p.x - start.x), height: abs(p.y - start.y))
@@ -987,7 +1011,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         case .resize(let handle, let original):
             if mode == .stage {
                 resizeStage(original, handle: handle, to: raw)
-            } else if let ratio = format.ratio {
+            } else if let ratio = lockedRatio {
                 // Formato travado: a área cresce ou diminui sem perder a proporção.
                 let r = SelectionFormat.resize(original, handle: handle, to: p, ratio: ratio, in: bounds)
                 if r.width >= 4, r.height >= 4 { selection = r }
@@ -1023,7 +1047,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
         switch drag {
         case .select:
             if let sel = selection, sel.width >= 4, sel.height >= 4 {
-                selection = format.snap(sel, in: bounds, scale: pixelScale)
+                if lockedRatio != nil { selection = format.snap(sel, in: bounds, scale: pixelScale) }
                 editing = true
                 areaChanged = true
             } else {
@@ -1035,7 +1059,7 @@ final class CaptureView: NSView, NSTextFieldDelegate {
             if mode == .stage {
                 normalizeStage()
             } else {
-                if let sel = selection { selection = format.snap(sel, in: bounds, scale: pixelScale) }
+                if lockedRatio != nil, let sel = selection { selection = format.snap(sel, in: bounds, scale: pixelScale) }
                 areaChanged = true
             }
         case .draw:
@@ -1588,26 +1612,60 @@ final class CaptureView: NSView, NSTextFieldDelegate {
 
     // MARK: Compartilhar
 
+    /// Compartilhar: Notas, e-mail, WhatsApp (e outros apps de conversa instalados), Mensagens, AirDrop e "Mais apps"
+    /// (o compartilhar completo do macOS, com Lembretes, Freeform, Fotos e as extensões de outros apps).
     private func showShareMenu(from button: NSView) {
         let menu = NSMenu()
-        let note = NSMenuItem(title: "Criar nota no Notas", action: #selector(shareToNotes), keyEquivalent: "")
-        note.image = Sharing.appIcon(bundleID: "com.apple.Notes")
-        let mail = NSMenuItem(title: "Enviar por e-mail", action: #selector(shareByEmail), keyEquivalent: "")
-        mail.image = Sharing.appIcon(bundleID: "com.apple.mail")
-        for item in [note, mail] {
+        var entries: [(title: String, icon: NSImage?, target: Sharing.Target)] = [
+            ("Criar nota no Notas", Sharing.appIcon(bundleID: "com.apple.Notes"), .notes),
+            ("Enviar por e-mail", Sharing.appIcon(bundleID: "com.apple.mail"), .email)
+        ]
+        for app in Sharing.installedChatApps {
+            entries.append(("Enviar pelo \(app.name)", app.url.map(Sharing.icon(forApp:)), .chat(app)))
+        }
+        entries.append(("Enviar pelo Mensagens", Sharing.appIcon(bundleID: "com.apple.MobileSMS"), .messages))
+        entries.append(("AirDrop", Sharing.serviceIcon(.airDrop), .airDrop))
+        for entry in entries {
+            let item = NSMenuItem(title: entry.title, action: #selector(shareMenuChose(_:)), keyEquivalent: "")
             item.target = self
+            item.image = entry.icon
+            item.representedObject = entry.target
             menu.addItem(item)
+        }
+        if let result = renderImage(), let url = Sharing.writeTemp(png: result.png) {
+            let picker = NSSharingServicePicker(items: [url])
+            picker.delegate = self
+            sharePicker = picker
+            let more = picker.standardShareMenuItem
+            more.title = "Mais apps"
+            more.image = NSImage(systemSymbolName: "ellipsis.circle", accessibilityDescription: nil)
+            menu.addItem(.separator())
+            menu.addItem(more)
         }
         menu.popUp(positioning: nil, at: CGPoint(x: 0, y: button.isFlipped ? button.bounds.maxY + 4 : -4), in: button)
     }
 
-    @objc private func shareToNotes() { share(to: .notes) }
-    @objc private func shareByEmail() { share(to: .email) }
+    @objc private func shareMenuChose(_ sender: NSMenuItem) {
+        guard let target = sender.representedObject as? Sharing.Target else { return }
+        share(to: target)
+    }
 
     private func share(to target: Sharing.Target) {
         guard let result = renderImage() else { return }
         if mode == .stage { host?.exported() } else { closeCapture() }
         Sharing.share(png: result.png, image: result.image, to: target, window: mode == .stage ? window : nil)
+    }
+
+    // "Mais apps": ao escolher um app, o seletor fecha antes de o app abrir (senão ele ficaria por cima).
+    func sharingServicePicker(_ sharingServicePicker: NSSharingServicePicker, didChoose service: NSSharingService?) {
+        sharePicker = nil
+        guard service != nil else { return }
+        if mode == .stage { host?.exported() } else { closeCapture() }
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func sharingServicePicker(_ sharingServicePicker: NSSharingServicePicker, delegateFor sharingService: NSSharingService) -> NSSharingServiceDelegate? {
+        Sharing.presenter(for: mode == .stage ? window : nil)
     }
 
     // MARK: Palco
@@ -1898,6 +1956,76 @@ final class LabelButton: NSButton {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     @objc private func clicked() { onClick?() }
+}
+
+/// Switch da barra no estilo do iOS: trilho azul quando ligado e bolinha branca que desliza com sombra.
+/// Desenhado aqui (e não o NSSwitch) para ficar colorido sempre: o do sistema fica cinza quando o app não está na frente,
+/// e o seletor de captura costuma abrir com outro app na frente.
+final class PremiumSwitch: NSControl {
+    var onChange: ((Bool) -> Void)?
+    private(set) var isOn = false
+    /// 0 = desligado, 1 = ligado; animado entre os dois.
+    @objc dynamic var progress: CGFloat = 0 {
+        didSet { needsDisplay = true }
+    }
+
+    init() {
+        super.init(frame: CGRect(x: 0, y: 0, width: 38, height: 22))
+        translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            widthAnchor.constraint(equalToConstant: 38),
+            heightAnchor.constraint(equalToConstant: 22)
+        ])
+        setAccessibilityElement(true)
+        setAccessibilityRole(.checkBox)
+        setAccessibilitySubrole(.switch)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) não é usado") }
+
+    override class func defaultAnimation(forKey key: NSAnimatablePropertyKey) -> Any? {
+        key == "progress" ? CABasicAnimation() : super.defaultAnimation(forKey: key)
+    }
+
+    func setOn(_ on: Bool, animated: Bool) {
+        isOn = on
+        setAccessibilityValue(on)
+        guard animated, window != nil else {
+            progress = on ? 1 : 0
+            return
+        }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.2
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            animator().progress = on ? 1 : 0
+        }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        setOn(!isOn, animated: true)
+        onChange?(isOn)
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let r = bounds
+        let off = NSColor.white.withAlphaComponent(0.2)
+        let track = off.blended(withFraction: progress, of: .systemBlue) ?? (isOn ? .systemBlue : off)
+        track.setFill()
+        NSBezierPath(roundedRect: r, xRadius: r.height / 2, yRadius: r.height / 2).fill()
+        let d = r.height - 4
+        let knob = CGRect(x: 2 + (r.width - d - 4) * progress, y: 2, width: d, height: d)
+        NSGraphicsContext.saveGraphicsState()
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.35)
+        shadow.shadowBlurRadius = 2.5
+        shadow.shadowOffset = NSSize(width: 0, height: -1)
+        shadow.set()
+        NSColor.white.setFill()
+        NSBezierPath(ovalIn: knob).fill()
+        NSGraphicsContext.restoreGraphicsState()
+    }
 }
 
 /// Espaço fixo dentro da barra.

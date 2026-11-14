@@ -1,14 +1,15 @@
 import AppKit
 
-// MARK: - Palcos prontos da área (widescreen 16:9, quadrada 1:1, tela inteira) e a tecla que move a área
+// MARK: - Palcos prontos da área (widescreen 16:9, mobile 9:16, quadrada 1:1, tela inteira) e a tecla que move a área
 
 enum SelectionFormat: String, CaseIterable {
-    case free, widescreen, square
+    case free, widescreen, mobile, square
 
     var title: String {
         switch self {
         case .free: return "Livre"
         case .widescreen: return "Widescreen"
+        case .mobile: return "Mobile"
         case .square: return "Quadrada"
         }
     }
@@ -18,6 +19,7 @@ enum SelectionFormat: String, CaseIterable {
         switch self {
         case .free: return nil
         case .widescreen: return (16, 9)
+        case .mobile: return (9, 16)
         case .square: return (1, 1)
         }
     }
@@ -29,6 +31,7 @@ enum SelectionFormat: String, CaseIterable {
         switch self {
         case .free: return nil
         case .widescreen: return "16:9"
+        case .mobile: return "9:16"
         case .square: return "1:1"
         }
     }
@@ -38,6 +41,7 @@ enum SelectionFormat: String, CaseIterable {
         switch self {
         case .free: return nil
         case .widescreen: return CGSize(width: 1920, height: 1080)
+        case .mobile: return CGSize(width: 1080, height: 1920)
         case .square: return CGSize(width: 1080, height: 1080)
         }
     }
@@ -45,8 +49,9 @@ enum SelectionFormat: String, CaseIterable {
     var help: String {
         switch self {
         case .free: return "Área livre, do tamanho que você arrastar"
-        case .widescreen: return "Palco widescreen 16:9 (1920 × 1080) no meio da tela · clique de novo para soltar a proporção"
-        case .square: return "Palco quadrado 1:1 (1080 × 1080) no meio da tela · clique de novo para soltar a proporção"
+        case .widescreen: return "Palco widescreen 16:9 (1920 × 1080) no meio da tela"
+        case .mobile: return "Palco vertical 9:16 (1080 × 1920), como a tela do celular, no meio da tela"
+        case .square: return "Palco quadrado 1:1 (1080 × 1080) no meio da tela"
         }
     }
 
@@ -54,6 +59,7 @@ enum SelectionFormat: String, CaseIterable {
         switch self {
         case .free: return nil
         case .widescreen: return AreaIcon.widescreen
+        case .mobile: return AreaIcon.mobile
         case .square: return AreaIcon.square
         }
     }
@@ -154,6 +160,12 @@ enum AreaIcon {
 
     static let widescreen = icon { drawFrame(CGRect(x: 1, y: 2.9, width: 18, height: 10.2), radius: 2.6) }
     static let square = icon { drawFrame(CGRect(x: 3.5, y: 1.5, width: 13, height: 13), radius: 2.6) }
+    static let mobile = icon {
+        // Celular em pé, com a ilha no alto da tela.
+        drawFrame(CGRect(x: 5.8, y: 0.6, width: 8.4, height: 14.8), radius: 2.6)
+        NSColor.black.setFill()
+        NSBezierPath(roundedRect: CGRect(x: 8.6, y: 12.3, width: 2.8, height: 1.1), xRadius: 0.55, yRadius: 0.55).fill()
+    }
     static let fullScreen = icon {
         // Monitor: tela com vidro por dentro, pescoço e pé.
         drawFrame(CGRect(x: 1, y: 4.6, width: 18, height: 10.9), radius: 2.2)

@@ -30,6 +30,12 @@ enum Preferences {
         set { defaults.set(newValue.rawValue, forKey: "selectionFormat") }
     }
 
+    /// Com um palco (Widescreen, Mobile, Quadrada), as alças e a área nova mantêm a proporção.
+    static var keepRatio: Bool {
+        get { defaults.object(forKey: "keepRatio") == nil ? true : defaults.bool(forKey: "keepRatio") }
+        set { defaults.set(newValue, forKey: "keepRatio") }
+    }
+
     /// Última área escolhida, em pontos da tela onde foi feita (origem em cima).
     static func lastSelection() -> (display: UInt32, rect: CGRect)? {
         guard let saved = defaults.dictionary(forKey: "lastSelection"),

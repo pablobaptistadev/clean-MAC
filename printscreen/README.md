@@ -12,9 +12,11 @@ Captura de tela para macOS no estilo do Lightshot: aperte o atalho, escolha a á
 - **Mover a área com uma ferramenta escolhida (ex.: a seta):** segure **⌥ Option** e arraste, de qualquer ponto da
   tela (a mãozinha aparece). A tecla pode ser ⌥, ⌘ ou ⌃ (Ajustes). Ou ligue o botão de **mãozinha** da barra de
   baixo (ou a tecla **M**): enquanto estiver azul, arrastar só move a área; clicar numa ferramenta volta a desenhar.
-- **Palco pronto:** na barra de baixo, **Widescreen** (1920 × 1080, 16:9) e **Quadrada** (1080 × 1080) põem a área
-  no meio da tela; **Tela inteira** pega a tela toda. Com Widescreen ou Quadrada azul, a área nova e as alças mantêm
-  a proporção; clique de novo no botão azul para soltar. Fica lembrado para as próximas capturas e vale também no vídeo.
+- **Palco pronto:** na barra de baixo, **Widescreen** (1920 × 1080, 16:9), **Mobile** (1080 × 1920, 9:16, em pé como
+  o celular) e **Quadrada** (1080 × 1080) põem a área no meio da tela; **Tela inteira** pega a tela toda. Se a tela
+  for menor, o palco diminui sem perder a proporção. Fica lembrado para as próximas capturas e vale também no vídeo.
+- **Manter proporção:** o switch da barra (azul = ligado). Ligado, a área nova e as alças mantêm o formato do palco;
+  desligado, o palco só põe a área no meio e o tamanho fica livre. Também está nos Ajustes.
 - **Marcar:** lápis, linha, seta, quadrado, círculo e texto, com a cor que quiser (paleta ou "Mais cores…").
   Segurando Shift, linha e seta ficam em ângulos de 45° e quadrado e círculo saem perfeitos.
 - **Desfocar:** a gota borra a área que você arrastar, para esconder senhas, nomes e números. A espessura
@@ -26,12 +28,16 @@ Captura de tela para macOS no estilo do Lightshot: aperte o atalho, escolha a á
   Com ela selecionada, a cor, a espessura e a roda do mouse mudam só ela; Delete apaga e as setas do teclado
   empurram (Shift: de 10 em 10). Esc tira a seleção.
 - **Desfazer / refazer:** ⌘Z e ⇧⌘Z, ou os botões da barra. Volta também o que foi movido, redimensionado ou apagado.
-- **Compartilhar:** botão ⬆︎ da barra de baixo › **Criar nota no Notas** ou **Enviar por e-mail** (abre o Mail com a
-  imagem anexada).
+- **Compartilhar:** botão ⬆︎ da barra de baixo › **Criar nota no Notas**, **Enviar por e-mail** (Mail com a imagem
+  anexada), **Enviar pelo WhatsApp**, **Mensagens**, **AirDrop** ou **Mais apps** (o compartilhar completo do macOS:
+  Lembretes, Freeform, Fotos e outros apps). O WhatsApp não tem extensão de compartilhamento no Mac: a imagem abre nele
+  para escolher a conversa e também fica copiada (se não aparecer, cole com ⌘V). Telegram, Slack, Discord, Teams e
+  Signal aparecem do mesmo jeito quando estão instalados.
 
 ## Ajustes (ícone da barra de menus › Ajustes…)
 - **Ferramenta já escolhida:** a captura já abre com ela (ex.: Seta) — é só arrastar a área e desenhar.
-- **Palco da área:** Livre, Widescreen ou Quadrada (o mesmo dos botões da barra).
+- **Palco da área:** Livre, Widescreen, Mobile ou Quadrada (o mesmo dos botões da barra).
+- **Manter a proporção do palco:** o mesmo switch da barra.
 - **Mover a área:** qual tecla segurar para arrastar a área sem largar a ferramenta (⌥ Option, ⌘ Command ou ⌃ Control).
 - **Começar com a última área escolhida:** ao apertar o atalho, a área da última captura já vem marcada; dá para
   copiar na hora (⌘C), desenhar ou ajustar. Clicar fora dela escolhe outra.
